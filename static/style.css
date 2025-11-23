@@ -8,6 +8,7 @@
   --accent: #38bdf8;
   --accent-strong: #0ea5e9;
   --success: #22c55e;
+  --warn: #f59e0b;
   --danger: #ef4444;
   --border: #1e293b;
   --shadow: 0 14px 30px rgba(0, 0, 0, 0.25);
@@ -218,6 +219,113 @@ a {
   background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
   line-height: 1.5;
+}
+
+.event-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.01);
+  margin-bottom: 8px;
+}
+
+.event-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.event-title {
+  font-weight: 700;
+}
+
+.event-summary {
+  color: var(--muted);
+}
+
+.severity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  background: rgba(56, 189, 248, 0.08);
+  color: #e0f2fe;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.severity-pill.severity-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #dcfce7;
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.severity-pill.severity-medium {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fef3c7;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.severity-pill.severity-high {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ffe4e6;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.event-timestamp {
+  color: var(--muted);
+}
+
+.night-reports h3 {
+  margin: 0 0 6px;
+}
+
+.report-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.report-controls select {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 200px;
+}
+
+.report-viewer {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #d1d5db;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 /* Buttons */

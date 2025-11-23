@@ -8,6 +8,9 @@ const els = {
   nightStatusText: document.getElementById("night-status-text"),
   nightStatusIndicator: document.getElementById("night-status-indicator"),
   nightEventsLog: document.getElementById("night-events-log"),
+  nightReportSelect: document.getElementById("night-report-select"),
+  nightReportViewer: document.getElementById("night-report-viewer"),
+  nightReportButton: document.getElementById("btn-view-report"),
   btnNightStart: document.getElementById("btn-night-start"),
   btnNightStop: document.getElementById("btn-night-stop"),
   chatForm: document.getElementById("chat-form"),
@@ -39,6 +42,19 @@ function notify(message, type = "info") {
 function truncate(text, max = 160) {
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function firstLine(text = "") {
+  const [line] = text.toString().split(/\r?\n/);
+  return line ? line.trim() : "";
+}
+
+function severityTone(level = "") {
+  const normalized = level.toString().toLowerCase();
+  if (normalized === "ok" || normalized === "low") return "ok";
+  if (normalized === "medium") return "medium";
+  if (normalized === "high" || normalized === "critical") return "high";
+  return "info";
 }
 
 function setStatusIndicator(running) {
@@ -109,16 +125,36 @@ function renderEventItem(event) {
   const timestamp = event.timestamp || "";
   const analysis = event.analysis || {};
   const severity = analysis.severity || event.severity || "info";
+  const tone = severityTone(severity);
   const title = analysis.title || event.title || "";
-  const summary = analysis.summary || event.summary || "";
+  const summary = firstLine(analysis.summary || event.summary || "");
 
-  wrapper.innerHTML = `
-    <div class="event-meta">
-      <strong>${severity.toString().toUpperCase()}</strong> · <span>${timestamp}</span>
-    </div>
-    <div class="event-title">${title}</div>
-    <div class="event-summary">${truncate(summary, 200)}</div>
-  `;
+  const meta = document.createElement("div");
+  meta.className = "event-meta";
+
+  const severityPill = document.createElement("span");
+  severityPill.className = `severity-pill severity-${tone}`;
+  severityPill.textContent = severity.toString().toUpperCase();
+
+  const timestampEl = document.createElement("span");
+  timestampEl.className = "event-timestamp";
+  timestampEl.textContent = timestamp;
+
+  meta.appendChild(severityPill);
+  meta.appendChild(timestampEl);
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "event-title";
+  titleEl.textContent = title;
+
+  const summaryEl = document.createElement("div");
+  summaryEl.className = "event-summary";
+  summaryEl.textContent = truncate(summary, 200);
+
+  wrapper.appendChild(meta);
+  wrapper.appendChild(titleEl);
+  wrapper.appendChild(summaryEl);
+
   return { element: wrapper, severity };
 }
 
@@ -144,6 +180,65 @@ async function loadNightEvents() {
   } catch (err) {
     console.error(err);
     notify("Failed to load night events", "error");
+  }
+}
+
+async function loadNightReports() {
+  try {
+    const resp = await fetch("/api/night/reports");
+    if (!resp.ok) throw new Error(`Failed to load reports: ${resp.status}`);
+    const reports = await resp.json();
+    const list = Array.isArray(reports) ? reports : [];
+
+    if (!els.nightReportSelect) return;
+
+    els.nightReportSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = list.length ? "Select a report…" : "No reports available";
+    els.nightReportSelect.appendChild(placeholder);
+
+    list.forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      els.nightReportSelect.appendChild(opt);
+    });
+
+    if (!list.length && els.nightReportViewer) {
+      els.nightReportViewer.textContent = "No reports available yet.";
+    }
+  } catch (err) {
+    console.error(err);
+    notify("Failed to load night reports", "error");
+  }
+}
+
+async function viewSelectedReport() {
+  if (!els.nightReportSelect) return;
+  const filename = els.nightReportSelect.value;
+  if (!filename) {
+    notify("Please select a report first", "error");
+    return;
+  }
+
+  if (els.nightReportViewer) {
+    els.nightReportViewer.textContent = "Loading report...";
+  }
+
+  try {
+    const resp = await fetch(`/api/night/report/${encodeURIComponent(filename)}`);
+    if (!resp.ok) throw new Error(`Failed to load report: ${resp.status}`);
+    const text = await resp.text();
+    if (els.nightReportViewer) {
+      els.nightReportViewer.textContent = text || "(No content)";
+    }
+  } catch (err) {
+    console.error(err);
+    notify("Failed to load report", "error");
+    if (els.nightReportViewer) {
+      els.nightReportViewer.textContent = "Unable to load report.";
+    }
   }
 }
 
@@ -211,6 +306,15 @@ function setupNightButtons() {
   }
 }
 
+function setupNightReports() {
+  if (els.nightReportButton) {
+    els.nightReportButton.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      viewSelectedReport();
+    });
+  }
+}
+
 function setupChat() {
   if (els.chatSend) {
     els.chatSend.addEventListener("click", (ev) => {
@@ -230,7 +334,9 @@ window.addEventListener("DOMContentLoaded", () => {
   loadClusterPods();
   loadNightStatus();
   loadNightEvents();
+  loadNightReports();
   setupNightButtons();
+  setupNightReports();
   setupChat();
   startPolling();
 });

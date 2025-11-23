@@ -73,6 +73,18 @@
           <!-- Night mode events will render here -->
         </div>
       </div>
+
+      <div class="night-reports">
+        <h3>Night Mode Reports</h3>
+        <div class="report-controls">
+          <label for="night-report-select" class="sr-only">Available reports</label>
+          <select id="night-report-select">
+            <option value="">Select a report…</option>
+          </select>
+          <button type="button" id="btn-view-report">View Report</button>
+        </div>
+        <pre class="report-viewer" id="night-report-viewer" aria-live="polite">Choose a report to view its details.</pre>
+      </div>
     </section>
 
     <section class="panel" id="chat-console">
