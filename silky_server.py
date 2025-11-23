@@ -5,7 +5,9 @@ This app mirrors the configuration of silky_sentinel.py and exposes
 simple REST endpoints plus a lightweight chat handler.
 """
 import json
+import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -16,9 +18,11 @@ from fastapi.staticfiles import StaticFiles
 from silky_sentinel import (
     NIGHT_LOG_PATH,
     REPORTS_DIR,
+    NIGHT_INTERVAL_SECONDS,
     client,
     ensure_kubeconfig,
     night_collect_cluster_health,
+    night_mode_loop,
     truncate_for_model,
     LLM_MODEL,
 )
@@ -45,10 +49,19 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Night mode tracking
+night_thread = None
+night_stop_event = None
+night_start_time = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _night_running():
+    return night_thread is not None and night_thread.is_alive()
+
+
 def read_night_events(limit: int = 50):
     if not NIGHT_LOG_PATH.exists():
         return []
@@ -108,6 +121,58 @@ def cluster_pods():
 def night_events(limit: int = 50):
     events = read_night_events(limit)
     return events
+
+
+@app.post("/api/night/start")
+def night_start():
+    global night_thread, night_stop_event, night_start_time
+
+    if _night_running():
+        raise HTTPException(status_code=400, detail="Night Mode is already running")
+
+    night_stop_event = threading.Event()
+
+    def runner():
+        night_mode_loop(interval_seconds=NIGHT_INTERVAL_SECONDS, stop_event=night_stop_event)
+
+    night_thread = threading.Thread(target=runner, name="night-mode-thread", daemon=True)
+    night_thread.start()
+    night_start_time = datetime.utcnow()
+
+    return {"status": "started", "interval_seconds": NIGHT_INTERVAL_SECONDS}
+
+
+@app.post("/api/night/stop")
+def night_stop():
+    global night_thread, night_stop_event, night_start_time
+
+    if not _night_running():
+        raise HTTPException(status_code=400, detail="Night Mode is not running")
+
+    if night_stop_event:
+        night_stop_event.set()
+
+    night_thread.join(timeout=5)
+
+    stopped_cleanly = not night_thread.is_alive()
+
+    if stopped_cleanly:
+        night_thread = None
+        night_stop_event = None
+        night_start_time = None
+
+    return {"status": "stopped", "stopped_cleanly": stopped_cleanly}
+
+
+@app.get("/api/night/status")
+def night_status():
+    running = _night_running()
+    start_time_str = night_start_time.isoformat() if night_start_time else None
+    return {
+        "running": running,
+        "start_time": start_time_str,
+        "interval_seconds": NIGHT_INTERVAL_SECONDS,
+    }
 
 
 @app.get("/api/night/reports")

@@ -713,7 +713,7 @@ def generate_night_mode_report() -> tuple[str, str]:
     return report_text, str(report_file)
 
 
-def night_mode_loop(interval_seconds: int = 300):
+def night_mode_loop(interval_seconds: int = 300, stop_event=None):
     """
     Night Mode:
     - Every interval, collect snapshot
@@ -724,6 +724,8 @@ def night_mode_loop(interval_seconds: int = 300):
     """
     notify_admin(f"Starting Silky Sentinel Night Mode (every {interval_seconds}s).", "INFO")
     last_fingerprint = None
+
+    interrupted = False
 
     try:
         while True:
@@ -761,15 +763,24 @@ def night_mode_loop(interval_seconds: int = 300):
 
                 last_fingerprint = fingerprint
 
-            time.sleep(interval_seconds)
+            if stop_event:
+                # Wait for the interval, but exit early if stop requested
+                if stop_event.wait(interval_seconds):
+                    interrupted = True
+                    break
+            else:
+                time.sleep(interval_seconds)
 
     except KeyboardInterrupt:
-        # User hit Ctrl+C: generate final session report
-        print("\n🌙 Night Mode interrupted by user (Ctrl+C). Generating final report...\n")
+        interrupted = True
+
+    if interrupted:
+        # User hit Ctrl+C or server requested stop: generate final session report
+        print("\n🌙 Night Mode interrupted. Generating final report...\n")
         report_text, report_file = generate_night_mode_report()
         print(report_text)
         print(f"\n📄 Night Mode report saved to: {report_file}")
-        notify_admin(f"Night Mode stopped by user; report saved to {report_file}", "INFO")
+        notify_admin(f"Night Mode stopped; report saved to {report_file}", "INFO")
 
 
 # --------------------------------------------------------------------

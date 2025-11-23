@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Silky Sentinel Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="navbar">
+    <h1>Silky Sentinel Dashboard</h1>
+  </header>
+
+  <main class="layout">
+    <section class="panel" id="cluster-overview">
+      <div class="panel-header">
+        <h2>Cluster Overview</h2>
+      </div>
+      <div class="cards">
+        <div class="card" id="card-total-pods">
+          <p class="label">Total Pods</p>
+          <p class="value" id="total-pods">0</p>
+        </div>
+        <div class="card" id="card-bad-pods">
+          <p class="label">Bad Pods</p>
+          <p class="value" id="bad-pods">0</p>
+        </div>
+        <div class="card" id="card-last-severity">
+          <p class="label">Last Severity</p>
+          <p class="value" id="last-severity">—</p>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table class="pods-table">
+          <thead>
+            <tr>
+              <th>Namespace</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Restarts</th>
+            </tr>
+          </thead>
+          <tbody id="pods-table-body">
+            <!-- Rows populated by app.js -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="night-mode">
+      <div class="panel-header">
+        <h2>Night Mode</h2>
+      </div>
+      <div class="night-status">
+        <span class="status-indicator stopped" id="night-status-indicator"></span>
+        <span id="night-status-text">Stopped</span>
+      </div>
+      <div class="night-actions">
+        <button id="btn-night-start">Start Night Shift</button>
+        <button id="btn-night-stop" class="secondary">Stop Night Shift</button>
+      </div>
+      <div class="night-meta">
+        <p><strong>Start Time:</strong> <span id="night-start-time">—</span></p>
+        <p><strong>Interval (s):</strong> <span id="night-interval">300</span></p>
+      </div>
+      <div class="night-events">
+        <h3>Recent Night Mode Events</h3>
+        <div class="events-list" id="night-events-log">
+          <!-- Events populated by app.js -->
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="chat-console">
+      <div class="panel-header">
+        <h2>Chat Console</h2>
+      </div>
+      <div class="chat-input">
+        <label for="chat-message">Message</label>
+        <textarea id="chat-message" rows="4" placeholder="Ask Silky Sentinel..."></textarea>
+        <button id="btn-chat-send">Send</button>
+      </div>
+      <div class="chat-response">
+        <h3>Assistant Response</h3>
+        <div class="response-box" id="chat-response-text"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
