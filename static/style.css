@@ -52,10 +52,18 @@ a {
 /* Layout */
 .layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "cluster cluster"
+    "night   chat";
   gap: 18px;
   padding: 24px 28px 32px;
 }
+
+#cluster-overview { grid-area: cluster; }
+#night-mode { grid-area: night; }
+#chat-console { grid-area: chat; }
 
 .panel {
   background: linear-gradient(145deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.9));
@@ -572,6 +580,17 @@ button.secondary:hover {
 
 ::-webkit-scrollbar-track {
   background: #0f172a;
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "cluster"
+      "night"
+      "chat";
+  }
 }
 
 @media (max-width: 720px) {
