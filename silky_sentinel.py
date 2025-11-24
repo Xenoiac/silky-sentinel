@@ -80,26 +80,89 @@ def truncate_for_model(text: str, max_chars: int = 4000) -> str:
     return text[:max_chars] + f"\n\n...[truncated, original length {len(text)} chars]..."
 
 
-def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Build a system prompt for Silky Sentinel's SRE brain.
+def _summarize_unified_context_for_prompt(context: Dict[str, Any]) -> str:
+    """Generate a compact summary string for the system prompt."""
 
-    The assistant should:
-    - Behave like a senior SRE / DevOps engineer for a Kubernetes platform.
-    - Be cluster-aware and cost-aware (reliability, latency, resource use, and cost).
-    - Answer concisely in 1–4 short sentences.
-    - Explain issues in language understandable by SREs, developers, and managers.
-    - When possible, mention: what was checked, what it means, and the single most important next step.
-    """
-    base = (
-        "You are Silky Sentinel, a senior Site Reliability Engineer for a Kubernetes platform. "
-        "You always answer concisely (1-4 short sentences) and clearly, in language that SREs, developers, and managers can all understand. "
-        "You are cluster-aware and cost-aware: you care about reliability, latency, resource utilization, and cloud cost. "
-        "When you describe a result, mention what you checked, what it means, and the single most important next step, if any. "
+    if not context:
+        return "No cluster context available yet."
+
+    cluster = context.get("cluster_snapshot") or {}
+    summary = cluster.get("summary") or {}
+    namespaces = cluster.get("namespaces") or {}
+
+    cpu = summary.get("cpu") or {}
+    mem = summary.get("memory") or {}
+    nodes = summary.get("nodes") or {}
+    pods_summary = summary.get("pods") or {}
+
+    cpu_line = (
+        f"CPU {cpu.get('used_cores', 0)}/{cpu.get('total_cores', 0)} cores"
+        f" ({cpu.get('utilization_percent', 0)}%)."
     )
+    mem_line = (
+        f"Memory {mem.get('used_gib', 0)}/{mem.get('total_gib', 0)} GiB"
+        f" ({mem.get('utilization_percent', 0)}%)."
+    )
+    node_line = f"Nodes ready {nodes.get('ready', 0)}/{nodes.get('count', 0)}."
+    pods_line = (
+        f"Pods unhealthy {pods_summary.get('unhealthy', 0)}/"
+        f"{pods_summary.get('total', 0)}."
+    )
+
+    def _format_namespace_list(items: List[Dict[str, Any]], label: str) -> Optional[str]:
+        if not items:
+            return None
+        formatted = ", ".join(
+            [
+                f"{i.get('namespace', i.get('name', '?'))}"
+                f"({i.get('value', i.get('cpu', i.get('memory', '?')))})"
+                for i in items
+            ]
+        )
+        return f"Top namespaces by {label}: {formatted}."
+
+    ns_cpu = _format_namespace_list(namespaces.get("top_by_cpu") or [], "CPU")
+    ns_mem = _format_namespace_list(namespaces.get("top_by_memory") or [], "memory")
+
+    pod_inventory = cluster.get("pods") or []
+    pod_line = f"Pod inventory tracked: {len(pod_inventory)} pods." if pod_inventory else None
+
+    events = context.get("recent_events") or []
+    events_line = f"Recent Night Mode events: {len(events)} entries." if events else "No recent Night Mode events."
+
+    latest_report = truncate_for_model(context.get("latest_report", ""), max_chars=240)
+    report_line = (
+        f"Latest Night Mode report snippet: {latest_report}" if latest_report else "No Night Mode report available."
+    )
+
+    parts = [
+        cpu_line,
+        mem_line,
+        node_line,
+        pods_line,
+        ns_cpu,
+        ns_mem,
+        pod_line,
+        events_line,
+        report_line,
+    ]
+
+    return " ".join([p for p in parts if p])
+
+
+def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
+    """Build the Silky Sentinel persona prompt, with compact context."""
+
+    base = (
+        "You are Silky Sentinel, senior SRE/DevOps for a Kubernetes platform, cluster-aware and cost-aware. "
+        "Keep answers short and clear (1-4 sentences) for SREs, developers, and management. "
+        "Propose kubectl/shell commands when helpful. "
+        "When summarizing, always state what was checked, what it means, and the single most important next step. "
+    )
+
     if context:
-        # Provide a compact, safe view of context (do not dump huge blobs).
-        base += f"Context summary: {str(context)[:1200]} "
+        base += f"Current context: {_summarize_unified_context_for_prompt(context)}"
+
     return base
 
 
@@ -142,23 +205,41 @@ def _read_recent_night_events(limit: int = 15) -> List[Dict[str, Any]]:
 def build_unified_sre_context() -> Dict[str, Any]:
     """
     Collect a compact context bundle for the SRE brain (cluster + night mode).
+
+    Each piece is gathered defensively; failures simply yield empty values.
     """
+
+    context: Dict[str, Any] = {
+        "mode": SILKY_MODE,
+        "cluster_snapshot": {},
+        "recent_events": [],
+        "latest_report": "",
+    }
 
     try:
         ensure_kubeconfig()
     except Exception:
         pass
 
-    snapshot = night_collect_cluster_health()
-    events = _read_recent_night_events(limit=15)
-    latest_report = _latest_report_text_or_empty()
+    try:
+        snapshot = night_collect_cluster_health()
+        context["cluster_snapshot"] = snapshot or {}
+    except Exception:
+        context["cluster_snapshot"] = {}
 
-    return {
-        "mode": SILKY_MODE,
-        "cluster_snapshot": snapshot,
-        "recent_events": events,
-        "latest_report": truncate_for_model(latest_report, max_chars=3000),
-    }
+    try:
+        events = _read_recent_night_events(limit=15)
+        context["recent_events"] = events or []
+    except Exception:
+        context["recent_events"] = []
+
+    try:
+        latest_report = _latest_report_text_or_empty()
+        context["latest_report"] = truncate_for_model(latest_report, max_chars=3000)
+    except Exception:
+        context["latest_report"] = ""
+
+    return context
 
 
 def ensure_kubeconfig() -> str:
@@ -679,99 +760,100 @@ def _append_command_result_to_messages(state: AgentState, command: str, result: 
     return short_summary
 
 
-def build_cli_agent_system_prompt(context_data: Dict[str, Any]) -> str:
-    return f"""
-You are 'Silky Sentinel', a senior DevOps/SRE assistant for Silky Systems.
+def build_sre_agent_system_prompt(
+    unified_context: Optional[Dict[str, Any]] = None,
+    runtime_defaults: Optional[Dict[str, Any]] = None,
+) -> str:
+    """System prompt for the JSON-driven agent, with persona + context."""
 
-You are running in a special mode where you can:
-- Propose concrete shell commands (kubectl, oci, bash, etc.).
-- Request local log analysis on large files.
-- Receive the actual outputs/digests back.
-- Use that data to decide next steps.
-- Eventually provide a final human-readable answer.
+    runtime_defaults = runtime_defaults or {}
+    region = runtime_defaults.get("oci_region", OCI_REGION)
+    compartment = runtime_defaults.get("oci_compartment_ocid", OCI_COMPARTMENT_OCID)
+    kubeconfig = runtime_defaults.get("kubeconfig", KUBECONFIG)
+
+    persona = build_sre_system_prompt(unified_context)
+    context_summary = _summarize_unified_context_for_prompt(unified_context or {})
+
+    return f"""
+{persona}
+
+You run with a command-and-log workflow:
+- Propose kubectl/OCI/shell commands when they move the investigation forward.
+- Request local log analysis for big files instead of reading them directly.
+- Use outputs to decide next steps; finish with a short human-readable answer.
+
+Environment awareness:
+- Default region: {region}
+- Default compartment: {compartment}
+- Kubeconfig: {kubeconfig}
+- Night Mode monitors this cluster and feeds you recent events/reports.
+- Cluster/Night Mode context (summary): {context_summary}
 
 CRITICAL RULES:
-
-1. YOU NEVER CLAIM YOU EXECUTED ANYTHING.
-   The Python layer will optionally execute the commands **only if the user approves**.
-
-2. YOU MUST ALWAYS RESPOND IN PURE JSON, WITH NO MARKDOWN OR EXTRA TEXT.
-   There are only THREE allowed shapes:
-
-   a) To request a command to be run:
+1) NEVER claim you executed anything. The Python layer runs commands only after user approval.
+2) ALWAYS respond in pure JSON (no markdown). Allowed shapes:
+   a) Request a command:
       {{
         "action": "run_command",
-        "command": "<the exact shell command>",
-        "reason": "<short explanation why this command is needed>"
+        "command": "<exact shell command>",
+        "reason": "<short explanation>"
       }}
-
-   b) To request local log analysis (NO shell command, just local file scan):
+   b) Request local log analysis (no shell command):
       {{
         "action": "analyze_log",
-        "log_path": "<absolute path to the log file>",
+        "log_path": "<absolute path>",
         "keywords": ["ERROR", "Exception", "FATAL"],
         "context_lines": 5,
         "max_snippets": 50,
-        "reason": "<short explanation why this analysis is needed>"
+        "reason": "<short explanation>"
       }}
-
-      - The keywords/context_lines/max_snippets fields are optional;
-        if you omit them, the default values will be used.
-      - Use this for HUGE logs (tens of MB). Do NOT ask to run shell commands
-        that dump massive logs and then send all stdout to the model.
-
-   c) To finish and give the final answer:
+   c) Finish:
       {{
         "action": "final_answer",
         "content": "<final human-readable explanation, including any suggested commands>"
       }}
+   - No extra keys. No code fences.
 
-   - No code fences.
-   - No additional keys.
+3) Kubernetes guidance:
+   - Prefer `kubectl`; include `-n <namespace>` when needed.
+   - Keep log outputs short (e.g., `kubectl logs <pod> -n <ns> --tail=100`).
+   - If unsure of names, propose discovery commands.
 
-3. KUBERNETES / K8S:
-   - Prefer `kubectl` commands.
-   - When namespaces matter, always include `-n <namespace>` in your commands.
-   - For logs, prefer limited output, e.g.:
-       - `kubectl logs <pod> -n <ns> --tail=100`
-   - If you only know a domain/host (Ingress), you may:
-       - `kubectl get ingress -A | grep <domain>`
-       - `kubectl describe ingress -n <ns> <name>`
-       - then find Service -> Deployment -> Pods -> `kubectl logs ...`.
-   - If you don't know a value (namespace, pod name, etc.), propose discovery commands.
+4) OCI/OKE guidance:
+   - You may use `oci` CLI when appropriate (defaults above).
 
-4. OCI / OKE:
-   - You may also use `oci` CLI commands when needed.
-   - Default region (if needed): {context_data['oci_region']}
-   - Default compartment (if needed): {context_data['oci_compartment_ocid']}
+5) Interaction strategy:
+   - Favor a short chain of commands with clear reasons over massive outputs.
+   - For destructive actions, be explicit in the reason and only propose them when requested.
 
-5. TOOL RESULTS:
-   - After a command is run, you will receive a message containing:
-       - The command
-       - exit code
-       - stdout
-       - stderr
-   - After a log analysis is run, you will receive a digest summary.
-   - Use that data to decide the next command or to produce the final answer.
-
-6. INTERACTION STRATEGY:
-   - Prefer a **short chain of commands** + occasional log analysis over huge raw outputs.
-   - For destructive operations (delete, scale down, restart, etc.), you should:
-       - Clearly reflect that in your 'reason'.
-       - Only propose them if the user explicitly requested it.
-
-Remember: JSON ONLY, strictly following one of the allowed schemas.
+Remember: JSON ONLY, using one of the allowed schemas.
 """
+
+
+def build_cli_agent_system_prompt(
+    context_data: Dict[str, Any], unified_context: Optional[Dict[str, Any]] = None
+) -> str:
+    runtime_defaults = {
+        "oci_region": context_data.get("oci_region", OCI_REGION),
+        "oci_compartment_ocid": context_data.get("oci_compartment_ocid", OCI_COMPARTMENT_OCID),
+        "kubeconfig": context_data.get("kubeconfig", KUBECONFIG),
+    }
+    return build_sre_agent_system_prompt(unified_context, runtime_defaults)
 
 
 def init_web_agent_state(user_question: str) -> AgentState:
     """
     Build the system+user messages for a web/HTTP session.
-    Use build_unified_sre_context() and build_sre_system_prompt(context) to create the system message.
+    Use build_unified_sre_context() and build_sre_agent_system_prompt(context) to create the system message.
     """
 
     unified = build_unified_sre_context()
-    system_prompt = build_sre_system_prompt(unified)
+    runtime_defaults = {
+        "oci_region": OCI_REGION,
+        "oci_compartment_ocid": OCI_COMPARTMENT_OCID,
+        "kubeconfig": KUBECONFIG,
+    }
+    system_prompt = build_sre_agent_system_prompt(unified, runtime_defaults)
     return init_agent_state(system_prompt, user_question, max_steps=12)
 
 
@@ -799,13 +881,14 @@ def agent_session(initial_query: str, max_steps: int = 8):
 
     notify_admin(f"User query: {initial_query}", "QUERY")
 
+    unified_context = build_unified_sre_context()
     context_data = {
         "oci_region": OCI_REGION,
         "oci_compartment_ocid": OCI_COMPARTMENT_OCID,
         "kubeconfig": KUBECONFIG,
     }
 
-    system_prompt = build_cli_agent_system_prompt(context_data)
+    system_prompt = build_cli_agent_system_prompt(context_data, unified_context)
     state = init_agent_state(system_prompt, initial_query, max_steps=max_steps)
     pending_decision: Optional[Dict[str, Any]] = None
 
