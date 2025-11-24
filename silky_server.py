@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +32,9 @@ from silky_sentinel import (
     init_agent_state,
     agent_step,
     build_system_prompt_for_agent,
+    build_sre_system_prompt,
+    get_llm_client,
+    extract_text_from_responses,
 )
 from uuid import uuid4
 
@@ -62,6 +65,7 @@ night_thread = None
 night_stop_event = None
 night_start_time = None
 agent_sessions = {}
+suggestion_chat_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +201,75 @@ def api_apply_suggestion(payload: Dict[str, Any]):
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to apply suggestion: {exc}")
+
+
+@app.post("/api/sre/suggestions/chat/start")
+def api_suggestion_chat_start(payload: Dict[str, Any]):
+    """
+    Start a mini chat session for a specific SRE suggestion.
+
+    Body:
+      { "title": str, "reason": str, "action": str, "command": str }
+    """
+    context = {
+        "suggestion_title": payload.get("title", ""),
+        "suggestion_reason": payload.get("reason", ""),
+        "suggestion_action": payload.get("action", ""),
+        "command": payload.get("command", ""),
+    }
+    system_prompt = build_sre_system_prompt(context)
+    user_prompt = (
+        "We are starting a discussion about this SRE suggestion for a Kubernetes cluster. "
+        "In 1-2 short sentences, summarize what this suggestion is about and invite questions."
+    )
+
+    client = get_llm_client()
+    completion = client.responses.create(
+        model=LLM_MODEL,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    assistant_text = extract_text_from_responses(completion).strip()
+
+    session_id = str(uuid4())
+    suggestion_chat_sessions[session_id] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "assistant", "content": assistant_text},
+    ]
+
+    return {"session_id": session_id, "assistant": assistant_text}
+
+
+@app.post("/api/sre/suggestions/chat/step")
+def api_suggestion_chat_step(payload: Dict[str, Any]):
+    """
+    Continue a mini chat session.
+
+    Body:
+      { "session_id": str, "message": str }
+    """
+    session_id = payload.get("session_id")
+    message = (payload.get("message") or "").strip()
+    if not session_id or session_id not in suggestion_chat_sessions:
+        raise HTTPException(status_code=404, detail="Suggestion chat session not found")
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    msgs = suggestion_chat_sessions[session_id]
+    msgs.append({"role": "user", "content": message})
+
+    client = get_llm_client()
+    completion = client.responses.create(
+        model=LLM_MODEL,
+        input=msgs,
+    )
+    assistant_text = extract_text_from_responses(completion).strip()
+    msgs.append({"role": "assistant", "content": assistant_text})
+    suggestion_chat_sessions[session_id] = msgs
+
+    return {"assistant": assistant_text}
 
 
 @app.post("/api/night/start")
