@@ -771,7 +771,7 @@ button.secondary:hover {
 
 .suggestion-discussion {
   margin-top: 8px;
-  border-top: 1px solid rgba(148, 163, 184, 0.3);
+  border-top: 1px solid rgba(148, 163, 184, 0.4);
   padding-top: 6px;
 }
 
@@ -793,6 +793,21 @@ button.secondary:hover {
   resize: vertical;
   min-height: 42px;
   max-height: 120px;
+}
+
+.suggestion-discussion-input button {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
+.msg-user {
+  color: #e5e7eb;
+  margin-bottom: 3px;
+}
+
+.msg-assistant {
+  color: #9ca3af;
+  margin-bottom: 3px;
 }
 
 @keyframes pulse {
