@@ -23,6 +23,7 @@ from silky_sentinel import (
     ensure_kubeconfig,
     night_collect_cluster_health,
     night_mode_loop,
+    summarize_night_mode,
     truncate_for_model,
     LLM_MODEL,
 )
@@ -90,6 +91,21 @@ def safe_report_path(filename: str) -> Path:
     return resolved
 
 
+def latest_report_text_or_empty() -> str:
+    if not REPORTS_DIR.exists():
+        return ""
+
+    candidates = [p for p in REPORTS_DIR.glob("**/*") if p.is_file()]
+    if not candidates:
+        return ""
+
+    latest_file = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        return latest_file.read_text(errors="replace")
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -132,6 +148,13 @@ def cluster_metrics():
 def night_events(limit: int = 50):
     events = read_night_events(limit)
     return events
+
+
+@app.get("/api/night/summary")
+def night_summary():
+    events = read_night_events(limit=120)
+    latest = latest_report_text_or_empty()
+    return summarize_night_mode(events, latest)
 
 
 @app.post("/api/night/start")

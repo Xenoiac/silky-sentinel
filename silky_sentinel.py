@@ -849,6 +849,89 @@ def night_collect_cluster_health() -> dict:
     return snapshot
 
 
+def summarize_night_mode(events: list, latest_report: str | None) -> dict:
+    """
+    Use OpenAI (LLM_MODEL) to produce:
+    - summary_markdown: human-readable summary of events
+    - severity_histogram: counts of severities found
+    - recommendations: short bullet tips
+    All fields returned as a dict. Input must be truncated using existing helpers.
+    """
+
+    safe_events = events if isinstance(events, list) else []
+
+    histogram = {}
+    for ev in safe_events:
+        severity = None
+        if isinstance(ev, dict):
+            analysis = ev.get("analysis") or {}
+            severity = analysis.get("severity") or ev.get("severity")
+        if severity:
+            sev_norm = str(severity).lower()
+            histogram[sev_norm] = histogram.get(sev_norm, 0) + 1
+
+    if client is None:
+        latest_sev = next(iter(histogram)) if histogram else "unknown"
+        return {
+            "summary_markdown": (
+                "LLM client is not configured. "
+                f"Observed {len(safe_events)} event(s); latest severity={latest_sev}."
+            ),
+            "severity_histogram": histogram,
+            "recommendations": [
+                "Configure OPENAI_API_KEY to enable rich Night Mode summaries.",
+                "Review night_mode_events.log for detailed diagnostics.",
+            ],
+        }
+
+    events_json = truncate_for_model(json.dumps(safe_events[-120:]), max_chars=8000)
+    report_text = truncate_for_model(latest_report or "", max_chars=4000)
+
+    system = (
+        "You are Silky Sentinel. Summarize Night Mode activity for SREs.\n"
+        "Respond strictly in JSON with keys: summary_markdown (markdown string), "
+        "severity_histogram (object of severity->count), recommendations (array of short strings)."
+    )
+
+    user = (
+        "Recent Night Mode events (truncated):\n"
+        f"{events_json}\n\n"
+        "Latest Night Mode report (truncated; may be empty):\n"
+        f"{report_text}"
+    )
+
+    try:
+        resp = client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        raw = resp.output_text.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(raw)
+
+        return {
+            "summary_markdown": parsed.get("summary_markdown") or "(No summary returned)",
+            "severity_histogram": parsed.get("severity_histogram") or histogram,
+            "recommendations": parsed.get("recommendations") or [],
+        }
+    except Exception:
+        return {
+            "summary_markdown": (
+                "Failed to generate Night Mode summary. "
+                "Check OpenAI configuration or logs for details."
+            ),
+            "severity_histogram": histogram,
+            "recommendations": [
+                "Verify OPENAI_API_KEY is set and valid.",
+                "Inspect recent Night Mode events for anomalies.",
+            ],
+        }
+
+
 def night_analyze_with_llm(snapshot: dict) -> dict:
     if client is None:
         return {
