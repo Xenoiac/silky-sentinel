@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import shutil
 import subprocess
 import requests
 import re
@@ -9,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from typing import TypedDict, List, Dict, Any, Optional
 
 # --------------------------------------------------------------------
 # Load .env from the same directory as this script
@@ -50,6 +52,25 @@ if OPENAI_API_KEY != "DUMMY_KEY_FOR_MOCK_DEMO":
 # --------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------
+def get_llm_client():
+    """Return the configured LLM client, if available."""
+
+    return client
+
+
+def extract_text_from_responses(response: Any) -> str:
+    """Safely extract text content from an OpenAI response object."""
+
+    if response is None:
+        return ""
+    if hasattr(response, "output_text"):
+        return getattr(response, "output_text") or ""
+    try:
+        return str(response)
+    except Exception:
+        return ""
+
+
 def truncate_for_model(text: str, max_chars: int = 4000) -> str:
     """Trim long text so we don't blow the model context window."""
     if text is None:
@@ -57,6 +78,29 @@ def truncate_for_model(text: str, max_chars: int = 4000) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + f"\n\n...[truncated, original length {len(text)} chars]..."
+
+
+def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Build a system prompt for Silky Sentinel's SRE brain.
+
+    The assistant should:
+    - Behave like a senior SRE / DevOps engineer for a Kubernetes platform.
+    - Be cluster-aware and cost-aware (reliability, latency, resource use, and cost).
+    - Answer concisely in 1–4 short sentences.
+    - Explain issues in language understandable by SREs, developers, and managers.
+    - When possible, mention: what was checked, what it means, and the single most important next step.
+    """
+    base = (
+        "You are Silky Sentinel, a senior Site Reliability Engineer for a Kubernetes platform. "
+        "You always answer concisely (1-4 short sentences) and clearly, in language that SREs, developers, and managers can all understand. "
+        "You are cluster-aware and cost-aware: you care about reliability, latency, resource utilization, and cloud cost. "
+        "When you describe a result, mention what you checked, what it means, and the single most important next step, if any. "
+    )
+    if context:
+        # Provide a compact, safe view of context (do not dump huge blobs).
+        base += f"Context summary: {str(context)[:1200]} "
+    return base
 
 
 def ensure_kubeconfig() -> str:
@@ -123,7 +167,7 @@ def log_audit_entry(command: str, result: dict):
         print(f"Failed to write audit log: {e}")
 
 
-def run_shell_command(command: str) -> dict:
+def run_shell_command(command: str, timeout: Optional[int] = None, cwd: Optional[str] = None) -> dict:
     """
     Actually execute a shell command and capture stdout/stderr/exit code.
     This is only called AFTER user approval (in chat mode) or by Night Mode.
@@ -137,6 +181,8 @@ def run_shell_command(command: str) -> dict:
             text=True,
             capture_output=True,
             env=env,
+            timeout=timeout,
+            cwd=cwd,
         )
         data = {
             "exit_code": result.returncode,
@@ -162,6 +208,91 @@ def run_shell_command(command: str) -> dict:
         except Exception:
             pass
         return data
+
+
+def apply_sre_suggestion(suggestion: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a suggested command and ask the SRE brain to summarize the outcome.
+
+    suggestion keys:
+      - title: str
+      - reason: str
+      - action: str
+      - command: str
+
+    Returns:
+      {
+        "status": "ok" | "error",
+        "summary": str,    # very short outcome summary
+        "next_step": str,  # optional follow-up step (may be empty)
+        "exit_code": int,
+      }
+    """
+    cmd = (suggestion.get("command") or "").strip()
+    context = {
+        "suggestion_title": suggestion.get("title", ""),
+        "suggestion_reason": suggestion.get("reason", ""),
+        "suggestion_action": suggestion.get("action", ""),
+        "command": cmd,
+    }
+    if not cmd:
+        return {
+            "status": "error",
+            "summary": "No command is defined for this suggestion.",
+            "next_step": "",
+            "exit_code": -1,
+        }
+
+    # 1) Run the command
+    result = run_shell_command(cmd)  # reuse your existing helper
+    stdout_val = getattr(result, "stdout", None)
+    stderr_val = getattr(result, "stderr", None)
+    exit_code_val = getattr(result, "exit_code", None)
+
+    if isinstance(result, dict):
+        stdout_val = stdout_val if stdout_val is not None else result.get("stdout")
+        stderr_val = stderr_val if stderr_val is not None else result.get("stderr")
+        exit_code_val = exit_code_val if exit_code_val is not None else result.get("exit_code")
+
+    stdout = (stdout_val or "")[:4000]
+    stderr = (stderr_val or "")[:4000]
+    exit_code = int(exit_code_val) if exit_code_val is not None else 0
+
+    # 2) Ask the SRE brain to summarize
+    system_prompt = build_sre_system_prompt(context)
+    user_prompt = (
+        "You recommended this action for a Kubernetes cluster, and we just ran the command.\n\n"
+        f"Command: {cmd}\n"
+        f"Exit code: {exit_code}\n\n"
+        f"STDOUT (truncated):\n{stdout}\n\n"
+        f"STDERR (truncated):\n{stderr}\n\n"
+        "In 1-3 short sentences, describe:\n"
+        "- what was checked or changed,\n"
+        "- what the results show,\n"
+        "- and whether any further action is needed (mention only one most important next step).\n"
+    )
+
+    llm_client = get_llm_client()
+    summary = ""
+
+    if llm_client is None:
+        summary = "Command executed; LLM summarization unavailable."
+    else:
+        completion = llm_client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        summary = extract_text_from_responses(completion).strip()
+
+    return {
+        "status": "ok" if exit_code == 0 else "error",
+        "summary": summary,
+        "next_step": "",
+        "exit_code": exit_code,
+    }
 
 
 # --------------------------------------------------------------------
@@ -233,6 +364,162 @@ def analyze_logs_locally(
 # --------------------------------------------------------------------
 # AI REASONING CORE WITH COMMAND-EXECUTION & LOG-ANALYSIS LOOP
 # --------------------------------------------------------------------
+class AgentState(TypedDict):
+    messages: List[Dict[str, Any]]
+    max_steps: int
+    steps_done: int
+
+
+def init_agent_state(system_prompt: str, first_user_message: str, max_steps: int = 8) -> AgentState:
+    return {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": first_user_message},
+        ],
+        "max_steps": max_steps,
+        "steps_done": 0,
+    }
+
+
+def build_system_prompt_for_agent(context: Optional[dict] = None) -> str:
+    context_section = ""
+    if context:
+        context_section = (
+            "Suggestion context:" "\n"
+            f"- Title: {context.get('title','')}\n"
+            f"- Reason: {context.get('reason','')}\n"
+            f"- Action: {context.get('action','')}\n"
+            f"- Command: {context.get('command','')}\n"
+        )
+
+    base_prompt = f"""
+You are 'Silky Sentinel', a senior DevOps/SRE assistant for Silky Systems.
+
+You are running in a special mode where you can:
+- Propose concrete shell commands (kubectl, oci, bash, etc.).
+- Request local log analysis on large files.
+- Receive the actual outputs/digests back.
+- Use that data to decide next steps.
+- Eventually provide a final human-readable answer.
+
+Cluster defaults:
+- Default region: {OCI_REGION}
+- Default compartment: {OCI_COMPARTMENT_OCID}
+
+{context_section}
+
+CRITICAL RULES:
+
+1. YOU NEVER CLAIM YOU EXECUTED ANYTHING.
+   The Python layer will optionally execute the commands **only if the user approves**.
+
+2. YOU MUST ALWAYS RESPOND IN PURE JSON, WITH NO MARKDOWN OR EXTRA TEXT.
+   There are only THREE allowed shapes:
+
+   a) To request a command to be run:
+      {{
+        "action": "run_command",
+        "command": "<the exact shell command>",
+        "reason": "<short explanation why this command is needed>"
+      }}
+
+   b) To request local log analysis (NO shell command, just local file scan):
+      {{
+        "action": "analyze_log",
+        "log_path": "<absolute path to the log file>",
+        "keywords": ["ERROR", "Exception", "FATAL"],
+        "context_lines": 5,
+        "max_snippets": 50,
+        "reason": "<short explanation why this analysis is needed>"
+      }}
+
+   - The keywords/context_lines/max_snippets fields are optional;
+     if you omit them, the default values will be used.
+
+   c) To finish and give the final answer:
+      {{
+        "action": "final_answer",
+        "content": "<final human-readable explanation, including any suggested commands>"
+      }}
+
+   - No code fences.
+   - No additional keys.
+
+3. KUBERNETES / K8S:
+   - Prefer `kubectl` commands.
+   - When namespaces matter, always include `-n <namespace>` in your commands.
+   - For logs, prefer limited output.
+   - If you don't know a value, propose discovery commands.
+
+4. OCI / OKE:
+   - You may also use `oci` CLI commands when needed.
+   - Default region (if needed): {OCI_REGION}
+   - Default compartment (if needed): {OCI_COMPARTMENT_OCID}
+
+Remember: JSON ONLY, strictly following one of the allowed schemas.
+"""
+    return base_prompt
+
+
+def agent_step(state: AgentState, user_decision: Optional[dict] = None) -> Dict[str, Any]:
+    if state["steps_done"] >= state["max_steps"]:
+        return {"status": "done", "answer": "Reached max steps", "state": state}
+
+    if user_decision and "message" in user_decision:
+        state["messages"].append({"role": "user", "content": user_decision.get("message", "")})
+
+    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
+        return {
+            "status": "done",
+            "answer": "Mock agent response.",
+            "state": state,
+        }
+
+    try:
+        resp = client.responses.create(
+            model=LLM_MODEL,
+            input=state["messages"],
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return {"status": "error", "answer": f"Agent call failed: {exc}"}
+
+    output_text = resp.output_text if hasattr(resp, "output_text") else ""
+    state["messages"].append({"role": "assistant", "content": output_text})
+    state["steps_done"] += 1
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        return {"status": "done", "answer": output_text, "state": state}
+
+    action = parsed.get("action")
+    if action == "final_answer":
+        return {"status": "done", "answer": parsed.get("content", ""), "state": state}
+
+    if action == "run_command":
+        reason = parsed.get("reason", "")
+        command = parsed.get("command", "")
+        return {
+            "status": "need_approval",
+            "action": "run_command",
+            "command": command,
+            "reason": reason,
+            "state": state,
+        }
+
+    if action == "analyze_log":
+        digest = analyze_logs_locally(
+            parsed.get("log_path", ""),
+            keywords=parsed.get("keywords"),
+            context_lines=parsed.get("context_lines", 5),
+            max_snippets=parsed.get("max_snippets", 50),
+        )
+        state["messages"].append({"role": "system", "content": digest})
+        return agent_step(state)
+
+    return {"status": "intermediate", "answer": output_text, "state": state}
+
+
 def agent_session(initial_query: str, max_steps: int = 8):
     """
     Start an interaction session with Silky Sentinel for a single user query.
@@ -501,49 +788,434 @@ def log_night_event(snapshot: dict, analysis: dict):
         print(f"Failed to write night mode log: {e}")
 
 
+def _latest_night_severity(default: str = "UNKNOWN") -> str:
+    if not NIGHT_LOG_PATH.exists():
+        return default
+
+    try:
+        last_line = None
+        with open(NIGHT_LOG_PATH, "r") as f:
+            for line in f:
+                if line.strip():
+                    last_line = line
+
+        if not last_line:
+            return default
+
+        data = json.loads(last_line)
+        analysis = data.get("analysis", {}) if isinstance(data, dict) else {}
+        severity = analysis.get("severity") or default
+        return severity.upper()
+    except Exception:
+        return default
+
+
 def night_collect_cluster_health() -> dict:
-    snapshot = {"pods": [], "summary": {}, "errors": []}
+    snapshot = {
+        "summary": {
+            "cpu": {
+                "total_cores": 0.0,
+                "used_cores": 0.0,
+                "utilization_percent": 0.0,
+            },
+            "memory": {
+                "total_gib": 0.0,
+                "used_gib": 0.0,
+                "utilization_percent": 0.0,
+            },
+            "storage": {
+                "total_gib": 0.0,
+                "used_gib": 0.0,
+                "utilization_percent": 0.0,
+            },
+            "pods": {
+                "total": 0,
+                "unhealthy": 0,
+                "unhealthy_percent": 0.0,
+                "by_status": {},
+            },
+            "nodes": {"count": 0, "ready": 0, "not_ready": 0},
+            "alerts": {"last_severity": _latest_night_severity(), "open_incidents": 0},
+            "queues": {
+                "enabled": False,
+                "total_backlog": 0,
+                "top_queues": [],
+            },
+        },
+        "namespaces": {
+            "top_by_cpu": [],
+            "top_by_memory": [],
+            "unhealthy_counts": [],
+        },
+        "pods": [],
+        "errors": [],
+    }
 
-    cmd = "kubectl get pods -A --no-headers"
-    result = run_shell_command(cmd)
-
-    if result["exit_code"] != 0:
-        snapshot["errors"].append(
-            {"collector": "pods", "error": result["stderr"] or "unknown error"}
-        )
-        return snapshot
-
-    lines = result["stdout"].splitlines()
-    total = 0
-    bad = 0
-
-    for line in lines:
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-
-        ns, name, ready, status, restarts = parts[0], parts[1], parts[2], parts[3], parts[4]
-
+    def parse_cpu_quantity(value: str) -> float:
+        if value is None:
+            return 0.0
         try:
-            restarts = int(restarts)
-        except:
-            restarts = -1
+            if isinstance(value, (int, float)):
+                return float(value)
+            value = str(value).strip()
+            if value.endswith("m"):
+                return float(value[:-1]) / 1000
+            return float(value)
+        except Exception:
+            return 0.0
 
-        pod = {
-            "namespace": ns,
-            "name": name,
-            "ready": ready,
-            "status": status,
-            "restarts": restarts,
+    def parse_memory_to_gib(value: str) -> float:
+        if value is None:
+            return 0.0
+        try:
+            value = str(value).strip()
+            multiplier = 1
+            if value.lower().endswith("ki"):
+                multiplier = 1 / (1024 * 1024)
+                value = value[:-2]
+            elif value.lower().endswith("mi"):
+                multiplier = 1 / 1024
+                value = value[:-2]
+            elif value.lower().endswith("gi"):
+                multiplier = 1
+                value = value[:-2]
+            elif value.lower().endswith("ti"):
+                multiplier = 1024
+                value = value[:-2]
+            elif value.lower().endswith("k"):
+                multiplier = 1 / (1024 * 1024)
+                value = value[:-1]
+            elif value.lower().endswith("m"):
+                multiplier = 1 / 1024
+                value = value[:-1]
+            elif value.lower().endswith("g"):
+                multiplier = 1
+                value = value[:-1]
+            return float(value) * multiplier
+        except Exception:
+            return 0.0
+
+    # Pods
+    pods_cmd = "kubectl get pods -A -o wide --no-headers"
+    pods_result = run_shell_command(pods_cmd)
+
+    if pods_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"pods collector failed: {pods_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        lines = pods_result["stdout"].splitlines()
+        status_counts = {}
+        total = 0
+        bad = 0
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+
+            ns, name, ready, status, restarts = (
+                parts[0],
+                parts[1],
+                parts[2],
+                parts[3],
+                parts[4],
+            )
+
+            age = parts[5] if len(parts) > 5 else ""
+            node = parts[7] if len(parts) > 7 else None
+
+            try:
+                restarts = int(restarts)
+            except Exception:
+                restarts = -1
+
+            pod = {
+                "namespace": ns,
+                "name": name,
+                "status": status,
+                "restarts": restarts,
+                "age": age,
+                "node": node,
+                "reason": None,
+            }
+            snapshot["pods"].append(pod)
+
+            total += 1
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status not in ("Running", "Completed") or restarts > 5:
+                bad += 1
+
+        bad_percent = (bad / total * 100) if total > 0 else 0.0
+        snapshot["summary"]["pods"] = {
+            "total": total,
+            "unhealthy": bad,
+            "unhealthy_percent": round(bad_percent, 2),
+            "by_status": status_counts,
         }
-        snapshot["pods"].append(pod)
 
-        total += 1
-        if status not in ("Running", "Completed") or restarts > 5:
-            bad += 1
+    try:
+        if NIGHT_LOG_PATH.exists():
+            with open(NIGHT_LOG_PATH, "r") as f:
+                recent = f.readlines()[-30:]
+            incidents = 0
+            for line in recent:
+                try:
+                    parsed = json.loads(line)
+                    sev = (
+                        parsed.get("analysis", {}).get("severity")
+                        if isinstance(parsed, dict)
+                        else None
+                    )
+                    if sev and str(sev).lower() in {"medium", "high", "critical"}:
+                        incidents += 1
+                except Exception:
+                    continue
+            snapshot["summary"]["alerts"]["open_incidents"] = incidents
+    except Exception:
+        pass
 
-    snapshot["summary"] = {"total_pods": total, "bad_pods": bad}
+    # Node readiness counts
+    nodes_cmd = "kubectl get nodes --no-headers"
+    nodes_result = run_shell_command(nodes_cmd)
+    if nodes_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"nodes collector failed: {nodes_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        ready = 0
+        not_ready = 0
+        for line in nodes_result["stdout"].splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            status = parts[1]
+            if status.startswith("Ready"):
+                ready += 1
+            else:
+                not_ready += 1
+
+        snapshot["summary"]["nodes"] = {
+            "count": ready + not_ready,
+            "ready": ready,
+            "not_ready": not_ready,
+        }
+
+    # Capacity from node JSON
+    nodes_json_cmd = "kubectl get nodes -o json"
+    nodes_json_result = run_shell_command(nodes_json_cmd)
+    cpu_total = 0.0
+    mem_total_gib = 0.0
+    if nodes_json_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"nodes_json collector failed: {nodes_json_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        try:
+            data = json.loads(nodes_json_result["stdout"] or "{}")
+            items = data.get("items", [])
+            for item in items:
+                capacity = (
+                    item.get("status", {}).get("capacity")
+                    if isinstance(item, dict)
+                    else {}
+                )
+                cpu_total += parse_cpu_quantity(capacity.get("cpu"))
+                mem_total_gib += parse_memory_to_gib(capacity.get("memory"))
+        except Exception as exc:
+            snapshot["errors"].append(f"nodes_json parse error: {exc}")
+
+    # Utilization from kubectl top
+    top_nodes_cmd = "kubectl top nodes"
+    top_nodes_result = run_shell_command(top_nodes_cmd)
+    cpu_used = 0.0
+    mem_used_gib = 0.0
+    if top_nodes_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"top_nodes collector failed: {top_nodes_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        lines = top_nodes_result["stdout"].splitlines()
+        for line in lines[1:]:  # skip header
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            cpu_used += parse_cpu_quantity(parts[1])
+            mem_used_gib += parse_memory_to_gib(parts[3])
+
+    cpu_util = (cpu_used / cpu_total * 100) if cpu_total > 0 else 0.0
+    mem_util = (mem_used_gib / mem_total_gib * 100) if mem_total_gib > 0 else 0.0
+
+    snapshot["summary"]["cpu"] = {
+        "total_cores": round(cpu_total, 2),
+        "used_cores": round(cpu_used, 2),
+        "utilization_percent": round(cpu_util, 2),
+    }
+
+    snapshot["summary"]["memory"] = {
+        "total_gib": round(mem_total_gib, 2),
+        "used_gib": round(mem_used_gib, 2),
+        "utilization_percent": round(mem_util, 2),
+    }
+
+    # Namespace leaderboards from kubectl top pods
+    top_pods_cmd = "kubectl top pods -A --no-headers"
+    top_pods_result = run_shell_command(top_pods_cmd)
+    ns_cpu = {}
+    ns_mem = {}
+    if top_pods_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"top_pods collector failed: {top_pods_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        for line in top_pods_result["stdout"].splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            ns, _, cpu_raw, mem_raw = parts[0], parts[1], parts[2], parts[3]
+            cpu_mcores = round(parse_cpu_quantity(cpu_raw) * 1000, 2)
+            mem_mib = round(parse_memory_to_gib(mem_raw) * 1024, 2)
+            ns_cpu[ns] = ns_cpu.get(ns, 0) + cpu_mcores
+            ns_mem[ns] = ns_mem.get(ns, 0) + mem_mib
+
+    top_cpu = sorted(ns_cpu.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    top_mem = sorted(ns_mem.items(), key=lambda kv: kv[1], reverse=True)[:5]
+
+    pods_per_namespace = {}
+    for pod in snapshot["pods"]:
+        pods_per_namespace[pod["namespace"]] = pods_per_namespace.get(
+            pod["namespace"], 0
+        ) + 1
+
+    snapshot["namespaces"]["top_by_cpu"] = [
+        {
+            "namespace": ns,
+            "cpu_mcores": cpu,
+            "pods": pods_per_namespace.get(ns, 0),
+        }
+        for ns, cpu in top_cpu
+    ]
+    snapshot["namespaces"]["top_by_memory"] = [
+        {
+            "namespace": ns,
+            "memory_mib": mem,
+            "pods": pods_per_namespace.get(ns, 0),
+        }
+        for ns, mem in top_mem
+    ]
+
+    unhealthy_by_namespace = {}
+    for pod in snapshot["pods"]:
+        if pod["status"] not in ("Running", "Completed") or pod["restarts"] > 5:
+            unhealthy_by_namespace[pod["namespace"]] = (
+                unhealthy_by_namespace.get(pod["namespace"], 0) + 1
+            )
+
+    snapshot["namespaces"]["unhealthy_counts"] = [
+        {"namespace": ns, "unhealthy_pods": count}
+        for ns, count in sorted(
+            unhealthy_by_namespace.items(), key=lambda kv: kv[1], reverse=True
+        )
+    ]
+
+    # Storage snapshot (local disk approximation)
+    try:
+        usage = shutil.disk_usage("/")
+        total_gib = usage.total / (1024**3)
+        used_gib = usage.used / (1024**3)
+        storage_util = (used_gib / total_gib * 100) if total_gib else 0.0
+        snapshot["summary"]["storage"] = {
+            "total_gib": round(total_gib, 2),
+            "used_gib": round(used_gib, 2),
+            "utilization_percent": round(storage_util, 2),
+        }
+    except Exception as exc:
+        snapshot["errors"].append(f"storage collector failed: {exc}")
+
     return snapshot
+
+
+def summarize_night_mode(events: list, latest_report: str | None) -> dict:
+    """
+    Use OpenAI (LLM_MODEL) to produce:
+    - summary_markdown: human-readable summary of events
+    - severity_histogram: counts of severities found
+    - recommendations: short bullet tips
+    All fields returned as a dict. Input must be truncated using existing helpers.
+    """
+
+    safe_events = events if isinstance(events, list) else []
+
+    histogram = {}
+    for ev in safe_events:
+        severity = None
+        if isinstance(ev, dict):
+            analysis = ev.get("analysis") or {}
+            severity = analysis.get("severity") or ev.get("severity")
+        if severity:
+            sev_norm = str(severity).lower()
+            histogram[sev_norm] = histogram.get(sev_norm, 0) + 1
+
+    if client is None:
+        latest_sev = next(iter(histogram)) if histogram else "unknown"
+        return {
+            "summary_markdown": (
+                "LLM client is not configured. "
+                f"Observed {len(safe_events)} event(s); latest severity={latest_sev}."
+            ),
+            "severity_histogram": histogram,
+            "recommendations": [
+                "Configure OPENAI_API_KEY to enable rich Night Mode summaries.",
+                "Review night_mode_events.log for detailed diagnostics.",
+            ],
+        }
+
+    events_json = truncate_for_model(json.dumps(safe_events[-120:]), max_chars=8000)
+    report_text = truncate_for_model(latest_report or "", max_chars=4000)
+
+    system = (
+        "You are Silky Sentinel. Summarize Night Mode activity for SREs.\n"
+        "Respond strictly in JSON with keys: summary_markdown (markdown string), "
+        "severity_histogram (object of severity->count), recommendations (array of short strings)."
+    )
+
+    user = (
+        "Recent Night Mode events (truncated):\n"
+        f"{events_json}\n\n"
+        "Latest Night Mode report (truncated; may be empty):\n"
+        f"{report_text}"
+    )
+
+    try:
+        resp = client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        raw = resp.output_text.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(raw)
+
+        return {
+            "summary_markdown": parsed.get("summary_markdown") or "(No summary returned)",
+            "severity_histogram": parsed.get("severity_histogram") or histogram,
+            "recommendations": parsed.get("recommendations") or [],
+        }
+    except Exception:
+        return {
+            "summary_markdown": (
+                "Failed to generate Night Mode summary. "
+                "Check OpenAI configuration or logs for details."
+            ),
+            "severity_histogram": histogram,
+            "recommendations": [
+                "Verify OPENAI_API_KEY is set and valid.",
+                "Inspect recent Night Mode events for anomalies.",
+            ],
+        }
 
 
 def night_analyze_with_llm(snapshot: dict) -> dict:
@@ -660,9 +1332,13 @@ def generate_night_mode_report() -> tuple[str, str]:
         lines.append(f"  - {sev}: {count} cycle(s)")
     lines.append("")
 
+    pods_summary = last_summary.get("pods", {}) if isinstance(last_summary, dict) else {}
     lines.append("Last snapshot cluster summary:")
-    lines.append(f"  - Total pods : {last_summary.get('total_pods', 'N/A')}")
-    lines.append(f"  - Bad pods   : {last_summary.get('bad_pods', 'N/A')}")
+    lines.append(f"  - Total pods       : {pods_summary.get('total', 'N/A')}")
+    lines.append(f"  - Unhealthy pods   : {pods_summary.get('unhealthy', 'N/A')}")
+    lines.append(
+        f"  - Unhealthy percent: {pods_summary.get('unhealthy_percent', 'N/A')}%"
+    )
     lines.append("")
 
     lines.append("Last analysis from Night Mode:")
@@ -713,7 +1389,89 @@ def generate_night_mode_report() -> tuple[str, str]:
     return report_text, str(report_file)
 
 
-def night_mode_loop(interval_seconds: int = 300):
+def generate_sre_suggestions(
+    snapshot: dict, events: list, latest_report: str | None
+) -> dict:
+    """
+    Use the existing OpenAI client (LLM_MODEL) via Responses API to generate a small set of SRE suggestions.
+
+    Input:
+      - snapshot: the cluster metrics summary returned by night_collect_cluster_health().
+      - events: recent Night Mode events (already have helpers to read them).
+      - latest_report: text of the most recent Night Mode report, or "".
+
+    Output:
+      - A dict with:
+        {
+          "suggestions": [
+            {
+              "id": "sug-0001",
+              "title": "Scale workers in prod",
+              "reason": "Queue backlog in prod exceeded 10k messages for 15 minutes.",
+              "action": "Scale the 'iacc-worker' deployment in 'prod' from 4 to 6 replicas.",
+              "command": "kubectl scale deployment iacc-worker -n prod --replicas=6",
+              "risk": "medium",   # low | medium | high
+              "category": "capacity" # capacity | reliability | pods | nodes | queues | networking
+            },
+            ...
+          ]
+        }
+
+    The model MUST respond with valid JSON exactly in this shape (no prose).
+    """
+
+    if client is None:
+        return {"suggestions": []}
+
+    context = {
+        "snapshot": snapshot,
+        "events": events,
+        "latest_report": latest_report,
+    }
+    system_prompt = (
+        build_sre_system_prompt(context)
+        + "You receive Kubernetes metrics, recent Night Mode events, and a high level report. "
+        "You must respond ONLY with JSON under a 'suggestions' key. Each suggestion must have a "
+        "concrete kubectl or diagnostic command in 'command', and a short 'action' sentence describing "
+        "what will be done."
+    )
+
+    snapshot_block = truncate_for_model(json.dumps(snapshot or {}))
+    events_block = truncate_for_model(json.dumps(events or []))
+    latest_report_block = truncate_for_model(latest_report or "")
+
+    user_prompt = (
+        "Cluster snapshot:\n"
+        f"{snapshot_block}\n\n"
+        "Recent events:\n"
+        f"{events_block}\n\n"
+        "Latest Night Mode report (text):\n"
+        f"{latest_report_block}"
+    )
+
+    try:
+        response = client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+
+        raw_text = response.output_text.strip()
+        clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_text)
+        if not isinstance(data, dict):
+            return {"suggestions": []}
+        suggestions = data.get("suggestions")
+        if not isinstance(suggestions, list):
+            return {"suggestions": []}
+        return {"suggestions": suggestions}
+    except Exception:
+        return {"suggestions": []}
+
+
+def night_mode_loop(interval_seconds: int = 300, stop_event=None):
     """
     Night Mode:
     - Every interval, collect snapshot
@@ -724,6 +1482,8 @@ def night_mode_loop(interval_seconds: int = 300):
     """
     notify_admin(f"Starting Silky Sentinel Night Mode (every {interval_seconds}s).", "INFO")
     last_fingerprint = None
+
+    interrupted = False
 
     try:
         while True:
@@ -761,15 +1521,24 @@ def night_mode_loop(interval_seconds: int = 300):
 
                 last_fingerprint = fingerprint
 
-            time.sleep(interval_seconds)
+            if stop_event:
+                # Wait for the interval, but exit early if stop requested
+                if stop_event.wait(interval_seconds):
+                    interrupted = True
+                    break
+            else:
+                time.sleep(interval_seconds)
 
     except KeyboardInterrupt:
-        # User hit Ctrl+C: generate final session report
-        print("\n🌙 Night Mode interrupted by user (Ctrl+C). Generating final report...\n")
+        interrupted = True
+
+    if interrupted:
+        # User hit Ctrl+C or server requested stop: generate final session report
+        print("\n🌙 Night Mode interrupted. Generating final report...\n")
         report_text, report_file = generate_night_mode_report()
         print(report_text)
         print(f"\n📄 Night Mode report saved to: {report_file}")
-        notify_admin(f"Night Mode stopped by user; report saved to {report_file}", "INFO")
+        notify_admin(f"Night Mode stopped; report saved to {report_file}", "INFO")
 
 
 # --------------------------------------------------------------------
