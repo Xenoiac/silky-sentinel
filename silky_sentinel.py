@@ -841,6 +841,8 @@ def night_collect_cluster_health() -> dict:
                 "total_backlog": 0,
                 "top_queues": [],
             },
+            "total_pods": 0,
+            "bad_pods": 0,
         },
         "namespaces": {
             "top_by_cpu": [],
@@ -953,6 +955,8 @@ def night_collect_cluster_health() -> dict:
             "unhealthy_percent": round(bad_percent, 2),
             "by_status": status_counts,
         }
+        snapshot["summary"]["total_pods"] = total
+        snapshot["summary"]["bad_pods"] = bad
 
     try:
         if NIGHT_LOG_PATH.exists():
