@@ -180,21 +180,23 @@
             </div>
             <div class="pill soft" id="pods-total-pill">0 pods</div>
           </header>
-          <table class="pods-table">
-            <thead>
-              <tr>
-                <th>Namespace</th>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Restarts</th>
-                <th>Age</th>
-                <th>Node</th>
-              </tr>
-            </thead>
-            <tbody id="pods-table-body">
-              <!-- Populated by /static/app.js -->
-            </tbody>
-          </table>
+          <div class="pods-table-container" id="pods-table-container">
+            <table class="pods-table">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Restarts</th>
+                  <th>Age</th>
+                  <th>Node</th>
+                </tr>
+              </thead>
+              <tbody id="pods-table-body">
+                <!-- Populated by /static/app.js -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
