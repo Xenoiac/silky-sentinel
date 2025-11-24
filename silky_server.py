@@ -30,6 +30,7 @@ from silky_sentinel import (
     LLM_MODEL,
     apply_sre_suggestion,
     build_sre_system_prompt,
+    build_unified_sre_context,
     AgentState,
     get_llm_client,
     extract_text_from_responses,
@@ -134,6 +135,7 @@ def _format_agent_step_response(session_id: str, result: Dict[str, Any]) -> Dict
         response.update(
             {
                 "command": result.get("command"),
+                "proposed_command": result.get("command"),
                 "reason": result.get("reason"),
                 "log_path": result.get("log_path"),
                 "keywords": result.get("keywords"),
@@ -150,9 +152,13 @@ def _format_agent_step_response(session_id: str, result: Dict[str, Any]) -> Dict
 
     ran = result.get("ran")
     if ran:
-        response["ran"] = ran
+        response["ran"] = {
+            "type": ran.get("type"),
+            "command": ran.get("command"),
+        }
         if ran.get("type") == "command":
-            response["command_summary"] = ran.get("summary")
+            response["command_output"] = ran.get("summary")
+            response["highlights"] = ran.get("highlights") or []
 
     return response
 
@@ -283,6 +289,7 @@ def api_suggestion_chat_start(payload: Dict[str, Any]):
         "suggestion_reason": payload.get("reason", ""),
         "suggestion_action": payload.get("action", ""),
         "command": payload.get("command", ""),
+        "unified_context": build_unified_sre_context(),
     }
     system_prompt = build_sre_system_prompt(context)
     user_prompt = (

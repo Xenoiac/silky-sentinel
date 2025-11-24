@@ -780,7 +780,7 @@ function appendProposal(data) {
   card.innerHTML = `
     <p class="entry-label">SRE Proposal</p>
     <p class="entry-title">${data.reason || "Proposed command"}</p>
-    <pre class="command-text">${data.proposed_command || ""}</pre>
+    <pre class="command-text">${data.command || data.proposed_command || ""}</pre>
   `;
 
   const actions = document.createElement("div");
@@ -794,7 +794,7 @@ function appendProposal(data) {
     btn.type = "button";
     btn.textContent = btnDef.label;
     btn.dataset.agentAction = btnDef.action;
-    btn.dataset.command = data.proposed_command || "";
+    btn.dataset.command = data.command || data.proposed_command || "";
     actions.appendChild(btn);
   });
 
@@ -803,13 +803,17 @@ function appendProposal(data) {
   scrollTimeline();
 }
 
-function appendCommandResult(summaryText) {
+function appendCommandResult(summaryText, highlights = []) {
   if (!els.chatTimeline) return;
   const card = document.createElement("div");
   card.className = "chat-entry command-entry";
+  const highlightHtml = Array.isArray(highlights)
+    ? highlights.map((line) => `<li>${line}</li>`).join("")
+    : "";
   card.innerHTML = `
     <p class="entry-label">Command Result</p>
     <p class="command-summary">${summaryText || "Command executed."}</p>
+    ${highlightHtml ? `<ul class="command-highlights">${highlightHtml}</ul>` : ""}
   `;
   els.chatTimeline.appendChild(card);
   scrollTimeline();
@@ -836,7 +840,7 @@ function renderAgentStep(data, { reset = false } = {}) {
   const hasCommandOutput = Boolean(data.command_output);
 
   if (hasCommandOutput) {
-    appendCommandResult(data.command_output);
+    appendCommandResult(data.command_output, data.highlights || []);
   }
 
   if (data.status === "need_approval") {

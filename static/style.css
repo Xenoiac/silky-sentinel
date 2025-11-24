@@ -802,6 +802,14 @@ button.secondary:hover {
   font-weight: 600;
 }
 
+.command-highlights {
+  margin: 6px 0 0 12px;
+  padding-left: 14px;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
 .final-answer-text {
   margin: 0;
   color: #e5e7eb;
