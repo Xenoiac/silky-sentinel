@@ -51,6 +51,7 @@ const els = {
 };
 
 let currentSuggestionSession = null;
+const suggestionSessions = new Map();
 let allPods = [];
 let podsRendered = 0;
 const PAGE_SIZE = 50;
@@ -583,6 +584,7 @@ async function loadSreSuggestions() {
         <p class="suggestion-reason">${s.reason}</p>
         <p class="suggestion-action"><strong>Action:</strong> ${s.action}</p>
         <pre class="suggestion-command">${s.command}</pre>
+        <div class="suggestion-result"></div>
         <div class="suggestion-actions">
           <button class="apply-btn">Apply</button>
           <button class="discuss-btn">Discuss</button>
@@ -594,6 +596,33 @@ async function loadSreSuggestions() {
   } catch (err) {
     listEl.innerText = "Failed to load suggestions.";
     console.error(err);
+  }
+}
+
+async function handleApplySuggestion(card, payload, resultEl) {
+  card.classList.add("running");
+  if (resultEl) {
+    resultEl.innerHTML = '<span class="suggestion-running-indicator">Running recommended action…</span>';
+  }
+  try {
+    const res = await fetch("/api/sre/suggestions/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    card.classList.remove("running");
+    if (resultEl) {
+      const icon = data.status === "ok" ? "✅" : "⚠️";
+      const summary = data.summary || "No summary available.";
+      resultEl.innerHTML = `<p><strong>${icon} Result:</strong> ${summary}</p>`;
+    }
+  } catch (err) {
+    card.classList.remove("running");
+    if (resultEl) {
+      resultEl.innerHTML = `<p><strong>⚠️ Result:</strong> Failed to run action.</p>`;
+    }
+    console.error("Apply suggestion failed", err);
   }
 }
 
@@ -706,53 +735,35 @@ function setupSuggestions() {
     });
   }
 
-  const listEl = document.getElementById("suggestions-list");
-  if (listEl) {
-    listEl.addEventListener("click", async (e) => {
-      const btn = e.target.closest("button");
-      if (!btn) return;
-      const card = e.target.closest("suggestion-card") || e.target.closest(".suggestion-card");
-      if (!card) return;
+  document.getElementById("suggestions-list")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const card = e.target.closest(".suggestion-card");
+    if (!card) return;
 
-      const id = card.dataset.suggestionId;
-      const title = card.querySelector(".suggestion-title")?.innerText || "";
-      const reason = card.querySelector(".suggestion-reason")?.innerText || "";
-      const actionText = card.querySelector(".suggestion-action")?.innerText || "";
-      const command = card.querySelector(".suggestion-command")?.innerText || "";
+    const title = card.querySelector(".suggestion-title")?.innerText || "";
+    const reason = card.querySelector(".suggestion-reason")?.innerText || "";
+    const actionText = card
+      .querySelector(".suggestion-action")
+      ?.innerText.replace(/^Action:\s*/i, "")
+      || "";
+    const cmd = card.querySelector(".suggestion-command")?.innerText || "";
+    const resultEl = card.querySelector(".suggestion-result");
 
-      if (btn.classList.contains("dismiss-btn")) {
-        card.remove();
-        return;
-      }
+    const payload = { title, reason, action: actionText, command: cmd };
 
-      if (btn.classList.contains("discuss-btn")) {
-        const textarea = document.getElementById("chat-message");
-        if (textarea) {
-          textarea.value = `About suggestion "${title}": ${reason}\n\nRecommended action: ${actionText}\n\nCan we review this and check if it's the best fix?`;
-          textarea.focus();
-        }
-        return;
-      }
+    if (btn.classList.contains("dismiss-btn")) {
+      card.remove();
+      return;
+    }
 
-      if (btn.classList.contains("apply-btn")) {
-        try {
-          const res = await fetch("/api/agent/start", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              question: `Apply remediation for suggestion "${title}". Reason: ${reason}. Recommended action: ${actionText}. Command to run: ${command}.`,
-              suggestion_id: id,
-            }),
-          });
-          const data = await res.json();
-          handleAgentResponseFromSuggestion(data);
-        } catch (err) {
-          console.error("Failed to start agent from suggestion", err);
-          notify("Failed to start agent for suggestion", "error");
-        }
-      }
-    });
-  }
+    if (btn.classList.contains("apply-btn")) {
+      await handleApplySuggestion(card, payload, resultEl);
+      return;
+    }
+
+    // discuss will be wired later in another prompt
+  });
 
   loadSreSuggestions();
 }

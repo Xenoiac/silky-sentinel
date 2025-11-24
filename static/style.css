@@ -677,6 +677,12 @@ button.secondary:hover {
 }
 
 /* Chat console */
+#chat-console {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .chat-form {
   display: flex;
   flex-direction: column;
@@ -684,9 +690,9 @@ button.secondary:hover {
 }
 
 .chat-suggestions {
-  margin-bottom: 16px;
   max-height: 40vh;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 .chat-suggestions-header {
@@ -702,12 +708,6 @@ button.secondary:hover {
   gap: 8px;
 }
 
-#chat-console {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .suggestion-card {
   padding: 10px 12px;
   border-radius: 12px;
@@ -717,8 +717,8 @@ button.secondary:hover {
 }
 
 .suggestion-card.running {
-  border-color: rgba(56, 189, 248, 0.7);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25);
 }
 
 .suggestion-title {
@@ -761,7 +761,12 @@ button.secondary:hover {
 .suggestion-running-indicator {
   font-size: 0.75rem;
   opacity: 0.8;
-  animation: pulse 1.2s infinite;
+  animation: suggestionPulse 1.1s infinite;
+}
+
+.suggestion-result {
+  margin-top: 6px;
+  font-size: 0.8rem;
 }
 
 .suggestion-discussion {
@@ -800,6 +805,12 @@ button.secondary:hover {
   100% {
     opacity: 0.4;
   }
+}
+
+@keyframes suggestionPulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
 }
 
 .night-header {
