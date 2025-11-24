@@ -153,6 +153,9 @@ def _summarize_unified_context_for_prompt(context: Dict[str, Any]) -> str:
 def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
     """Build the Silky Sentinel persona prompt, with compact context."""
 
+    unified_context = context.get("unified_context") if isinstance(context, dict) else None
+    context_for_summary = unified_context if unified_context is not None else context
+
     base = (
         "You are Silky Sentinel, senior SRE/DevOps for a Kubernetes platform, cluster-aware and cost-aware. "
         "Keep answers short and clear (1-4 sentences) for SREs, developers, and management. "
@@ -160,8 +163,13 @@ def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
         "When summarizing, always state what was checked, what it means, and the single most important next step. "
     )
 
-    if context:
-        base += f"Current context: {_summarize_unified_context_for_prompt(context)}"
+    if context_for_summary:
+        base += f"Current context: {_summarize_unified_context_for_prompt(context_for_summary)}"
+
+    base += (
+        "You already have Silky Sentinel's cluster snapshots and Night Mode data; do not claim you lack access. "
+        "Final answers must be short paragraphs that recap actions taken, findings, and exactly one next check/run step."
+    )
 
     return base
 
@@ -215,6 +223,11 @@ def build_unified_sre_context() -> Dict[str, Any]:
         "recent_events": [],
         "latest_report": "",
     }
+
+    if OPENAI_API_KEY == "TEST" or os.getenv("OPENAI_API_KEY") == "TEST" or os.getenv(
+        "SILKY_SKIP_CONTEXT_COLLECTION", ""
+    ).lower() == "true":
+        return context
 
     try:
         ensure_kubeconfig()
@@ -647,12 +660,15 @@ def agent_engine_step(
 
         if decision_type == "approve" and proposal_action == "run_command" and proposal_command:
             result = run_shell_command(proposal_command)
-            summary = _append_command_result_to_messages(state, proposal_command, result)
+            command_notes = _append_command_result_to_messages(
+                state, proposal_command, result
+            )
             ran = {
                 "type": "command",
                 "command": proposal_command,
                 "result": result,
-                "summary": summary,
+                "summary": command_notes.get("summary", ""),
+                "highlights": command_notes.get("highlights", []),
             }
         elif decision_type == "approve" and proposal_action == "analyze_log":
             log_path = proposal.get("log_path") or ""
@@ -699,7 +715,9 @@ def agent_engine_step(
     try:
         data = json.loads(clean_text)
     except json.JSONDecodeError:
-        return {"status": "done", "final_answer": clean_text, "ran": ran, "state": state}
+        raw_msg = f"RAW MODEL OUTPUT (non-JSON): {clean_text}"
+        notify_admin(raw_msg, "ERROR")
+        return {"status": "done", "final_answer": raw_msg, "ran": ran, "state": state}
 
     action = data.get("action")
     if action == "final_answer":
@@ -741,7 +759,20 @@ def agent_engine_step(
     }
 
 
-def _append_command_result_to_messages(state: AgentState, command: str, result: dict) -> str:
+def _extract_command_highlights(result: dict, max_lines: int = 4) -> List[str]:
+    """Return a few key lines from stdout/stderr for UI-friendly display."""
+
+    for key in ("stdout", "stderr"):
+        content = result.get(key) or ""
+        if not content:
+            continue
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+        if lines:
+            return lines[:max_lines]
+    return []
+
+
+def _append_command_result_to_messages(state: AgentState, command: str, result: dict) -> Dict[str, Any]:
     stdout_trimmed = truncate_for_model(result.get("stdout", ""), max_chars=4000)
     stderr_trimmed = truncate_for_model(result.get("stderr", ""), max_chars=2000)
     exit_code = result.get("exit_code", 0)
@@ -753,11 +784,14 @@ def _append_command_result_to_messages(state: AgentState, command: str, result: 
         f"STDERR:\n{stderr_trimmed}\n"
     )
     state["messages"].append({"role": "user", "content": result_text})
-    short_summary = (
-        f"Command `{command}` exited {exit_code}. "
-        f"STDOUT: {(stdout_trimmed or '<empty>')[:200]}"
-    )
-    return short_summary
+
+    highlights = _extract_command_highlights(result)
+    headline = highlights[0] if highlights else ""
+    summary = headline or f"Command `{command}` exited {exit_code}."
+    if headline:
+        summary = f"{headline} (exit {exit_code})."
+
+    return {"summary": summary, "highlights": highlights}
 
 
 def build_sre_agent_system_prompt(
@@ -781,6 +815,9 @@ You run with a command-and-log workflow:
 - Propose kubectl/OCI/shell commands when they move the investigation forward.
 - Request local log analysis for big files instead of reading them directly.
 - Use outputs to decide next steps; finish with a short human-readable answer.
+ - Use outputs to decide next steps; finish with a short human-readable answer.
+- When you describe command_output, provide a one-sentence human summary plus a few key lines, never full logs.
+- Final answers must recap what you checked, what you discovered, and the single next command/check.
 
 Environment awareness:
 - Default region: {region}
