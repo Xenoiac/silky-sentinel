@@ -639,6 +639,101 @@ function handleAgentResponseFromSuggestion(data) {
   }
 }
 
+async function openSuggestionDiscussion(card, payload) {
+  let discussion = card.querySelector(".suggestion-discussion");
+  if (!discussion) {
+    discussion = document.createElement("div");
+    discussion.className = "suggestion-discussion";
+    discussion.innerHTML = `
+      <div class="suggestion-discussion-log"></div>
+      <div class="suggestion-discussion-input">
+        <textarea placeholder="Ask about this suggestion…"></textarea>
+        <button class="suggestion-send-btn">Send</button>
+      </div>
+    `;
+    card.appendChild(discussion);
+  }
+
+  const logEl = discussion.querySelector(".suggestion-discussion-log");
+  const textarea = discussion.querySelector("textarea");
+  const sendBtn = discussion.querySelector(".suggestion-send-btn");
+
+  if (!suggestionSessions.has(card)) {
+    try {
+      const res = await fetch("/api/sre/suggestions/chat/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      suggestionSessions.set(card, data.session_id);
+      appendSuggestionMessage(
+        logEl,
+        "assistant",
+        data.assistant || "Let’s discuss this suggestion.",
+      );
+    } catch (err) {
+      appendSuggestionMessage(
+        logEl,
+        "assistant",
+        "I couldn't start a discussion session for this suggestion.",
+      );
+      console.error("start suggestion chat failed", err);
+    }
+  }
+
+  if (textarea) textarea.focus();
+  if (sendBtn && textarea) {
+    sendBtn.onclick = () => sendSuggestionMessage(card);
+    textarea.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        sendSuggestionMessage(card);
+      }
+    });
+  }
+}
+
+function appendSuggestionMessage(logEl, role, text) {
+  if (!logEl) return;
+  const div = document.createElement("div");
+  div.className = role === "user" ? "msg-user" : "msg-assistant";
+  div.textContent = text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function sendSuggestionMessage(card) {
+  const sessionId = suggestionSessions.get(card);
+  if (!sessionId) return;
+  const discussion = card.querySelector(".suggestion-discussion");
+  if (!discussion) return;
+  const logEl = discussion.querySelector(".suggestion-discussion-log");
+  const textarea = discussion.querySelector("textarea");
+  if (!logEl || !textarea) return;
+  const text = textarea.value.trim();
+  if (!text) return;
+  textarea.value = "";
+  appendSuggestionMessage(logEl, "user", text);
+
+  try {
+    const res = await fetch("/api/sre/suggestions/chat/step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message: text }),
+    });
+    const data = await res.json();
+    appendSuggestionMessage(logEl, "assistant", data.assistant || "[No answer]");
+  } catch (err) {
+    appendSuggestionMessage(
+      logEl,
+      "assistant",
+      "Error while replying about this suggestion.",
+    );
+    console.error("suggestion chat step failed", err);
+  }
+}
+
 async function sendChatMessage() {
   const message = (els.chatMessage.value || "").trim();
   if (!message) {
@@ -762,7 +857,10 @@ function setupSuggestions() {
       return;
     }
 
-    // discuss will be wired later in another prompt
+    if (btn.classList.contains("discuss-btn")) {
+      await openSuggestionDiscussion(card, payload);
+      return;
+    }
   });
 
   loadSreSuggestions();
