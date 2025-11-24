@@ -50,20 +50,17 @@ a {
 }
 
 /* Layout */
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas:
-    "cluster cluster"
-    "night   chat";
-  gap: 18px;
-  padding: 24px 28px 32px;
+#cluster-overview {
+  margin: 20px 28px 16px;
 }
 
-#cluster-overview { grid-area: cluster; }
-#night-mode { grid-area: night; }
-#chat-console { grid-area: chat; }
+.layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(320px, 1fr));
+  gap: 20px;
+  padding: 20px 28px 32px;
+  align-items: flex-start;
+}
 
 .panel {
   background: linear-gradient(145deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.9));
@@ -707,17 +704,16 @@ button.secondary:hover {
 
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto;
-    grid-template-areas:
-      "cluster"
-      "night"
-      "chat";
   }
 }
 
 @media (max-width: 720px) {
   .navbar {
     padding: 14px 18px;
+  }
+
+  #cluster-overview {
+    margin: 18px 18px 12px;
   }
 
   .layout {
