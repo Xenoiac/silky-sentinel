@@ -219,14 +219,27 @@
         </div>
 
         <div class="night-events">
-          <h3>Latest Night Mode Events</h3>
+          <div class="night-section-header">
+            <h3>Latest Night Mode Events</h3>
+            <button class="expand-btn" id="expand-night-events" type="button">Expand</button>
+          </div>
           <div class="events-log" id="night-events-log" aria-live="polite">
             <!-- Night mode events will render here -->
           </div>
         </div>
 
+        <section class="night-summary">
+          <h3>Night Mode Summary</h3>
+          <div id="night-summary-box" class="night-summary-box">
+            Loading summary…
+          </div>
+        </section>
+
         <div class="night-reports">
-          <h3>Night Mode Reports</h3>
+          <div class="night-section-header">
+            <h3>Night Mode Reports</h3>
+            <button class="expand-btn" id="expand-report-viewer" type="button">Expand</button>
+          </div>
           <div class="report-controls">
             <label for="night-report-select" class="sr-only">Available reports</label>
             <select id="night-report-select">
@@ -258,6 +271,13 @@
       </section>
     </div>
   </main>
+
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+        <button id="modal-close-btn" type="button">Close</button>
+        <pre id="modal-text"></pre>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

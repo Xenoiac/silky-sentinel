@@ -1,4 +1,5 @@
 const REFRESH_INTERVAL_MS = 30000;
+const SUMMARY_REFRESH_MS = 150000;
 
 const els = {
   lastSeverity: document.getElementById("last-severity"),
@@ -32,9 +33,15 @@ const els = {
   nightStatusText: document.getElementById("night-status-text"),
   nightStatusIndicator: document.getElementById("night-status-indicator"),
   nightEventsLog: document.getElementById("night-events-log"),
+  nightSummaryBox: document.getElementById("night-summary-box"),
   nightReportSelect: document.getElementById("night-report-select"),
   nightReportViewer: document.getElementById("night-report-viewer"),
   nightReportButton: document.getElementById("btn-view-report"),
+  expandNightEvents: document.getElementById("expand-night-events"),
+  expandReportViewer: document.getElementById("expand-report-viewer"),
+  modalOverlay: document.getElementById("modal-overlay"),
+  modalText: document.getElementById("modal-text"),
+  modalClose: document.getElementById("modal-close-btn"),
   btnNightStart: document.getElementById("btn-night-start"),
   btnNightStop: document.getElementById("btn-night-stop"),
   chatForm: document.getElementById("chat-form"),
@@ -83,6 +90,17 @@ function severityTone(level = "") {
   if (normalized === "medium") return "medium";
   if (normalized === "high" || normalized === "critical") return "high";
   return "info";
+}
+
+function openModal(text) {
+  if (!els.modalOverlay || !els.modalText) return;
+  els.modalText.textContent = text || "";
+  els.modalOverlay.classList.remove("hidden");
+}
+
+function closeModal() {
+  if (!els.modalOverlay) return;
+  els.modalOverlay.classList.add("hidden");
 }
 
 function gaugeTone(percent = 0) {
@@ -438,6 +456,19 @@ async function loadNightEvents() {
   }
 }
 
+async function loadNightSummary() {
+  if (!els.nightSummaryBox) return;
+  try {
+    const resp = await fetch("/api/night/summary");
+    if (!resp.ok) throw new Error(`Failed to load summary: ${resp.status}`);
+    const data = await resp.json();
+    els.nightSummaryBox.textContent = data.summary_markdown || "(No summary available)";
+  } catch (err) {
+    console.error(err);
+    els.nightSummaryBox.textContent = "Unable to load Night Mode summary.";
+  }
+}
+
 async function loadNightReports() {
   try {
     const resp = await fetch("/api/night/reports");
@@ -570,6 +601,34 @@ function setupNightReports() {
   }
 }
 
+function setupModal() {
+  if (els.modalClose) {
+    els.modalClose.addEventListener("click", () => closeModal());
+  }
+
+  if (els.modalOverlay) {
+    els.modalOverlay.addEventListener("click", (ev) => {
+      if (ev.target === els.modalOverlay) {
+        closeModal();
+      }
+    });
+  }
+}
+
+function setupExpanders() {
+  if (els.expandNightEvents) {
+    els.expandNightEvents.addEventListener("click", () => {
+      openModal(els.nightEventsLog?.innerText || "");
+    });
+  }
+
+  if (els.expandReportViewer) {
+    els.expandReportViewer.addEventListener("click", () => {
+      openModal(els.nightReportViewer?.innerText || "");
+    });
+  }
+}
+
 function setupChat() {
   if (els.chatSend) {
     els.chatSend.addEventListener("click", (ev) => {
@@ -583,6 +642,7 @@ function startPolling() {
   setInterval(loadClusterPods, REFRESH_INTERVAL_MS);
   setInterval(loadNightStatus, REFRESH_INTERVAL_MS);
   setInterval(loadNightEvents, REFRESH_INTERVAL_MS);
+  setInterval(loadNightSummary, SUMMARY_REFRESH_MS);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -591,8 +651,11 @@ window.addEventListener("DOMContentLoaded", () => {
   loadNightStatus();
   loadNightEvents();
   loadNightReports();
+  loadNightSummary();
   setupNightButtons();
   setupNightReports();
+  setupModal();
+  setupExpanders();
   setupChat();
   startPolling();
 });

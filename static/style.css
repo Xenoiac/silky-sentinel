@@ -483,6 +483,27 @@ a {
   gap: 10px;
 }
 
+.night-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.expand-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.expand-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .night-events h3 {
   margin: 0 0 8px;
   font-size: 1rem;
@@ -596,6 +617,19 @@ a {
   font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+.night-summary {
+  margin-top: 18px;
+}
+
+.night-summary-box {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  border-radius: 10px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -688,6 +722,47 @@ button.secondary:hover {
   background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
   line-height: 1.6;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: #0b1220;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  max-width: 960px;
+  width: 100%;
+  max-height: 90vh;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+#modal-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--muted);
+  flex: 1;
+}
+
+.hidden {
+  display: none !important;
 }
 
 /* Utility */
