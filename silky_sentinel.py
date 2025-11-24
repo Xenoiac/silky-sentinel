@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from typing import TypedDict, List, Dict, Any, Optional
 
 # --------------------------------------------------------------------
 # Load .env from the same directory as this script
@@ -124,7 +125,7 @@ def log_audit_entry(command: str, result: dict):
         print(f"Failed to write audit log: {e}")
 
 
-def run_shell_command(command: str) -> dict:
+def run_shell_command(command: str, timeout: Optional[int] = None, cwd: Optional[str] = None) -> dict:
     """
     Actually execute a shell command and capture stdout/stderr/exit code.
     This is only called AFTER user approval (in chat mode) or by Night Mode.
@@ -138,6 +139,8 @@ def run_shell_command(command: str) -> dict:
             text=True,
             capture_output=True,
             env=env,
+            timeout=timeout,
+            cwd=cwd,
         )
         data = {
             "exit_code": result.returncode,
@@ -163,6 +166,67 @@ def run_shell_command(command: str) -> dict:
         except Exception:
             pass
         return data
+
+
+def apply_sre_suggestion(suggestion: dict) -> dict:
+    """
+    Execute a single actionable suggestion and summarize the result.
+
+    suggestion includes:
+      - title
+      - reason
+      - action (human sentence)
+      - command (string; a kubectl or diagnostic command)
+    """
+
+    command = suggestion.get("command", "")
+    result = run_shell_command(command, timeout=60, cwd=None)
+
+    summary_prompt = f"""
+You are summarizing the outcome of an SRE automation action. Provide a concise status update (1-3 sentences) for leadership.
+
+Suggestion title: {suggestion.get('title','')}
+Reason: {suggestion.get('reason','')}
+Proposed action: {suggestion.get('action','')}
+Command executed: {command}
+
+Command exit code: {result.get('exit_code')}
+STDOUT (truncated): {truncate_for_model(result.get('stdout'), max_chars=1200)}
+STDERR (truncated): {truncate_for_model(result.get('stderr'), max_chars=800)}
+
+Respond with a clean, high-level summary noting success/failure and key findings. Avoid raw logs.
+"""
+
+    summary_text = ""
+    status = "ok"
+
+    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO" or client is None:
+        status = "error" if result.get("exit_code", 1) != 0 else "ok"
+        summary_text = (
+            "Mock execution; review audit logs for details." if client is None else summary_text
+        )
+    else:
+        try:
+            resp = client.responses.create(
+                model=LLM_MODEL,
+                input=[
+                    {
+                        "role": "user",
+                        "content": summary_prompt,
+                    }
+                ],
+            )
+            summary_text = resp.output_text if hasattr(resp, "output_text") else ""
+        except Exception as exc:  # pragma: no cover - network
+            summary_text = f"Failed to summarize result: {exc}"
+            status = "error"
+
+    return {
+        "status": status,
+        "summary": summary_text,
+        "exit_code": result.get("exit_code"),
+        "command": command,
+    }
 
 
 # --------------------------------------------------------------------
@@ -234,6 +298,162 @@ def analyze_logs_locally(
 # --------------------------------------------------------------------
 # AI REASONING CORE WITH COMMAND-EXECUTION & LOG-ANALYSIS LOOP
 # --------------------------------------------------------------------
+class AgentState(TypedDict):
+    messages: List[Dict[str, Any]]
+    max_steps: int
+    steps_done: int
+
+
+def init_agent_state(system_prompt: str, first_user_message: str, max_steps: int = 8) -> AgentState:
+    return {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": first_user_message},
+        ],
+        "max_steps": max_steps,
+        "steps_done": 0,
+    }
+
+
+def build_system_prompt_for_agent(context: Optional[dict] = None) -> str:
+    context_section = ""
+    if context:
+        context_section = (
+            "Suggestion context:" "\n"
+            f"- Title: {context.get('title','')}\n"
+            f"- Reason: {context.get('reason','')}\n"
+            f"- Action: {context.get('action','')}\n"
+            f"- Command: {context.get('command','')}\n"
+        )
+
+    base_prompt = f"""
+You are 'Silky Sentinel', a senior DevOps/SRE assistant for Silky Systems.
+
+You are running in a special mode where you can:
+- Propose concrete shell commands (kubectl, oci, bash, etc.).
+- Request local log analysis on large files.
+- Receive the actual outputs/digests back.
+- Use that data to decide next steps.
+- Eventually provide a final human-readable answer.
+
+Cluster defaults:
+- Default region: {OCI_REGION}
+- Default compartment: {OCI_COMPARTMENT_OCID}
+
+{context_section}
+
+CRITICAL RULES:
+
+1. YOU NEVER CLAIM YOU EXECUTED ANYTHING.
+   The Python layer will optionally execute the commands **only if the user approves**.
+
+2. YOU MUST ALWAYS RESPOND IN PURE JSON, WITH NO MARKDOWN OR EXTRA TEXT.
+   There are only THREE allowed shapes:
+
+   a) To request a command to be run:
+      {{
+        "action": "run_command",
+        "command": "<the exact shell command>",
+        "reason": "<short explanation why this command is needed>"
+      }}
+
+   b) To request local log analysis (NO shell command, just local file scan):
+      {{
+        "action": "analyze_log",
+        "log_path": "<absolute path to the log file>",
+        "keywords": ["ERROR", "Exception", "FATAL"],
+        "context_lines": 5,
+        "max_snippets": 50,
+        "reason": "<short explanation why this analysis is needed>"
+      }}
+
+   - The keywords/context_lines/max_snippets fields are optional;
+     if you omit them, the default values will be used.
+
+   c) To finish and give the final answer:
+      {{
+        "action": "final_answer",
+        "content": "<final human-readable explanation, including any suggested commands>"
+      }}
+
+   - No code fences.
+   - No additional keys.
+
+3. KUBERNETES / K8S:
+   - Prefer `kubectl` commands.
+   - When namespaces matter, always include `-n <namespace>` in your commands.
+   - For logs, prefer limited output.
+   - If you don't know a value, propose discovery commands.
+
+4. OCI / OKE:
+   - You may also use `oci` CLI commands when needed.
+   - Default region (if needed): {OCI_REGION}
+   - Default compartment (if needed): {OCI_COMPARTMENT_OCID}
+
+Remember: JSON ONLY, strictly following one of the allowed schemas.
+"""
+    return base_prompt
+
+
+def agent_step(state: AgentState, user_decision: Optional[dict] = None) -> Dict[str, Any]:
+    if state["steps_done"] >= state["max_steps"]:
+        return {"status": "done", "answer": "Reached max steps", "state": state}
+
+    if user_decision and "message" in user_decision:
+        state["messages"].append({"role": "user", "content": user_decision.get("message", "")})
+
+    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
+        return {
+            "status": "done",
+            "answer": "Mock agent response.",
+            "state": state,
+        }
+
+    try:
+        resp = client.responses.create(
+            model=LLM_MODEL,
+            input=state["messages"],
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return {"status": "error", "answer": f"Agent call failed: {exc}"}
+
+    output_text = resp.output_text if hasattr(resp, "output_text") else ""
+    state["messages"].append({"role": "assistant", "content": output_text})
+    state["steps_done"] += 1
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        return {"status": "done", "answer": output_text, "state": state}
+
+    action = parsed.get("action")
+    if action == "final_answer":
+        return {"status": "done", "answer": parsed.get("content", ""), "state": state}
+
+    if action == "run_command":
+        reason = parsed.get("reason", "")
+        command = parsed.get("command", "")
+        return {
+            "status": "need_approval",
+            "action": "run_command",
+            "command": command,
+            "reason": reason,
+            "state": state,
+        }
+
+    if action == "analyze_log":
+        digest = analyze_logs_locally(
+            parsed.get("log_path", ""),
+            keywords=parsed.get("keywords"),
+            context_lines=parsed.get("context_lines", 5),
+            max_snippets=parsed.get("max_snippets", 50),
+        )
+        state["messages"].append({"role": "system", "content": digest})
+        return agent_step(state)
+
+    return {"status": "intermediate", "answer": output_text, "state": state}
+
+
 def agent_session(initial_query: str, max_steps: int = 8):
     """
     Start an interaction session with Silky Sentinel for a single user query.

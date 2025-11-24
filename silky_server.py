@@ -27,7 +27,12 @@ from silky_sentinel import (
     summarize_night_mode,
     truncate_for_model,
     LLM_MODEL,
+    apply_sre_suggestion,
+    init_agent_state,
+    agent_step,
+    build_system_prompt_for_agent,
 )
+from uuid import uuid4
 
 # ---------------------------------------------------------------------------
 # FastAPI app setup
@@ -55,6 +60,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 night_thread = None
 night_stop_event = None
 night_start_time = None
+agent_sessions = {}
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +177,18 @@ def sre_suggestions():
     return generate_sre_suggestions(snapshot, events, latest)
 
 
+@app.post("/api/sre/suggestions/apply")
+def apply_suggestion(payload: dict):
+    suggestion = {
+        "title": payload.get("title", ""),
+        "reason": payload.get("reason", ""),
+        "action": payload.get("action", ""),
+        "command": payload.get("command", ""),
+    }
+    result = apply_sre_suggestion(suggestion)
+    return result
+
+
 @app.post("/api/night/start")
 def night_start():
     global night_thread, night_stop_event, night_start_time
@@ -283,6 +301,38 @@ def chat(payload: dict):
     raw_answer = response.output_text.strip()
     cleaned = raw_answer.replace("```json", "").replace("```", "").strip()
     return {"answer": cleaned}
+
+
+@app.post("/api/agent/start")
+def agent_start(payload: dict):
+    question = (payload or {}).get("question", "")
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    system_prompt = build_system_prompt_for_agent(context=payload.get("context"))
+    state = init_agent_state(system_prompt, question)
+    result = agent_step(state, user_decision=None)
+    session_id = str(uuid4())
+    agent_sessions[session_id] = state
+    result["session_id"] = session_id
+    return result
+
+
+@app.post("/api/agent/step")
+def agent_step_api(payload: dict):
+    session_id = (payload or {}).get("session_id")
+    decision = (payload or {}).get("decision")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    state = agent_sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    result = agent_step(state, user_decision=decision)
+    agent_sessions[session_id] = state
+    result["session_id"] = session_id
+    return result
 
 
 # Run with: uvicorn silky_server:app --reload
