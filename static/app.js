@@ -47,8 +47,8 @@ const els = {
   stopNightBtn: document.getElementById("stop-night-btn"),
   chatForm: document.getElementById("chat-form"),
   chatMessage: document.getElementById("chat-message"),
-  chatSend: document.getElementById("btn-chat-send"),
-  chatResponse: document.getElementById("chat-response-text"),
+  chatSend: document.getElementById("chat-send-btn"),
+  chatTimeline: document.getElementById("chat-timeline"),
 };
 
 let currentSuggestionSession = null;
@@ -634,8 +634,12 @@ function handleAgentResponseFromSuggestion(data) {
   }
 
   currentSuggestionSession = data?.session_id || null;
-  if (els.chatResponse) {
-    renderAgentStep(data, true);
+  if (currentSuggestionSession) {
+    currentAgentSessionId = currentSuggestionSession;
+  }
+
+  if (els.chatTimeline) {
+    renderAgentStep(data, { reset: true });
   }
 }
 
@@ -734,69 +738,123 @@ async function sendSuggestionMessage(card) {
   }
 }
 
-function appendAgentBlock(text, className = "") {
-  const container = els.chatResponse;
-  if (!container) return;
-  const div = document.createElement("div");
-  div.className = `agent-block ${className}`.trim();
-  div.textContent = text;
-  container.appendChild(div);
+function scrollTimeline() {
+  if (!els.chatTimeline) return;
+  els.chatTimeline.scrollTop = els.chatTimeline.scrollHeight;
 }
 
-function renderAgentStep(data, reset = false) {
-  const container = els.chatResponse;
-  if (!container || !data) return;
+function resetTimeline() {
+  if (els.chatTimeline) {
+    els.chatTimeline.innerHTML = "";
+  }
+}
+
+function appendUserMessage(text) {
+  if (!els.chatTimeline) return;
+  const card = document.createElement("div");
+  card.className = "chat-entry user-entry";
+  card.innerHTML = `
+    <p class="entry-label">You</p>
+    <p class="entry-text">${text}</p>
+  `;
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+}
+
+function appendDecision(decisionText) {
+  if (!els.chatTimeline) return;
+  const card = document.createElement("div");
+  card.className = "chat-entry user-entry";
+  card.innerHTML = `
+    <p class="entry-label">Decision</p>
+    <span class="decision-chip">You: ${decisionText}</span>
+  `;
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+}
+
+function appendProposal(data) {
+  if (!els.chatTimeline) return;
+  const card = document.createElement("div");
+  card.className = "chat-entry proposal-entry";
+  card.innerHTML = `
+    <p class="entry-label">SRE Proposal</p>
+    <p class="entry-title">${data.reason || "Proposed command"}</p>
+    <pre class="command-text">${data.proposed_command || ""}</pre>
+  `;
+
+  const actions = document.createElement("div");
+  actions.className = "proposal-actions";
+  [
+    { label: "Approve", action: "approve" },
+    { label: "Deny", action: "deny" },
+    { label: "Skip", action: "skip" },
+  ].forEach((btnDef) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = btnDef.label;
+    btn.dataset.agentAction = btnDef.action;
+    btn.dataset.command = data.proposed_command || "";
+    actions.appendChild(btn);
+  });
+
+  card.appendChild(actions);
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+}
+
+function appendCommandResult(summaryText) {
+  if (!els.chatTimeline) return;
+  const card = document.createElement("div");
+  card.className = "chat-entry command-entry";
+  card.innerHTML = `
+    <p class="entry-label">Command Result</p>
+    <p class="command-summary">${summaryText || "Command executed."}</p>
+  `;
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+}
+
+function appendFinalAnswer(answerText) {
+  if (!els.chatTimeline) return;
+  const card = document.createElement("div");
+  card.className = "chat-entry final-entry";
+  card.innerHTML = `
+    <p class="entry-label">Final Answer</p>
+    <p class="final-answer-text">${answerText || ""}</p>
+  `;
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+}
+
+function renderAgentStep(data, { reset = false } = {}) {
+  if (!els.chatTimeline || !data) return;
   if (reset) {
-    container.innerHTML = "";
+    resetTimeline();
   }
 
-  if (data.command_output) {
-    appendAgentBlock(data.command_output, "agent-output");
+  const hasCommandOutput = Boolean(data.command_output);
+
+  if (hasCommandOutput) {
+    appendCommandResult(data.command_output);
   }
 
   if (data.status === "need_approval") {
-    const block = document.createElement("div");
-    block.className = "agent-block agent-command";
-
-    const reason = document.createElement("p");
-    reason.className = "agent-reason";
-    reason.textContent = data.reason || "Proposed command";
-    block.appendChild(reason);
-
-    const pre = document.createElement("pre");
-    pre.textContent = data.proposed_command || "";
-    block.appendChild(pre);
-
-    const actions = document.createElement("div");
-    actions.className = "agent-actions";
-
-    [
-      { label: "Approve", action: "approve" },
-      { label: "Deny", action: "deny" },
-      { label: "Skip", action: "skip" },
-    ].forEach((btnDef) => {
-      const btn = document.createElement("button");
-      btn.textContent = btnDef.label;
-      btn.dataset.agentAction = btnDef.action;
-      btn.dataset.command = data.proposed_command || "";
-      actions.appendChild(btn);
-    });
-
-    block.appendChild(actions);
-    container.appendChild(block);
-    container.scrollTop = container.scrollHeight;
+    appendProposal(data);
     return;
   }
 
-  if (data.status === "running_command") {
-    const block = document.createElement("div");
-    block.className = "agent-block agent-running";
-    block.innerHTML = `<span class="agent-running-indicator"></span> Running…`;
-    container.appendChild(block);
+  if (data.status === "running_command" && !hasCommandOutput) {
+    appendCommandResult("Executing command…");
+  }
+
+  if (data.status === "intermediate" && data.proposed_command) {
+    appendProposal(data);
+    return;
   }
 
   if (data.status === "done") {
-    appendAgentBlock(data.final_answer || data.answer || "", "agent-final");
+    appendFinalAnswer(data.final_answer || data.answer || "");
     currentAgentSessionId = null;
   }
 }
@@ -823,6 +881,7 @@ async function pollNextAgentStep() {
 
 async function handleAgentDecision(decisionType, commandText) {
   if (!currentAgentSessionId) return;
+  appendDecision(decisionType.charAt(0).toUpperCase() + decisionType.slice(1));
 
   const res = await fetch("/api/agent/step", {
     method: "POST",
@@ -851,10 +910,8 @@ async function startAgentFromChat() {
   }
 
   currentAgentSessionId = null;
-  if (els.chatResponse) {
-    els.chatResponse.innerHTML = "";
-    appendAgentBlock(message, "agent-user");
-  }
+  resetTimeline();
+  appendUserMessage(message);
 
   try {
     const res = await fetch("/api/agent/start", {
@@ -934,15 +991,15 @@ function setupChat() {
 
   if (els.chatMessage) {
     els.chatMessage.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+      if (ev.key === "Enter" && !ev.shiftKey) {
         ev.preventDefault();
         startAgentFromChat();
       }
     });
   }
 
-  if (els.chatResponse) {
-    els.chatResponse.addEventListener("click", async (ev) => {
+  if (els.chatTimeline) {
+    els.chatTimeline.addEventListener("click", async (ev) => {
       const btn = ev.target.closest("button[data-agent-action]");
       if (!btn) return;
       const action = btn.dataset.agentAction;
