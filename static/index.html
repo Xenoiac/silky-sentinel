@@ -201,16 +201,16 @@
       </section>
 
       <section class="panel" id="night-mode">
-        <div class="panel-header night-header">
-          <div>
+        <header class="panel-header night-header">
+          <div class="night-header-left">
             <h2>Night Mode</h2>
           </div>
-          <div class="night-header-controls">
-            <span id="night-status-pill" class="status-pill status-stopped">● Stopped</span>
-            <button type="button" id="start-night-btn" data-endpoint="/api/night/start">Start Night Shift</button>
-            <button type="button" class="secondary" id="stop-night-btn" data-endpoint="/api/night/stop">Stop Night Shift</button>
+          <div class="night-header-right">
+            <span id="night-status-pill" class="night-status-pill night-status-stopped">● Stopped</span>
+            <button id="start-night-btn" class="btn">Start Night Shift</button>
+            <button id="stop-night-btn" class="btn btn-secondary">Stop Night Shift</button>
           </div>
-        </div>
+        </header>
 
         <div class="night-events">
           <div class="night-section-header">
