@@ -56,6 +56,7 @@ const suggestionSessions = new Map();
 let allPods = [];
 let podsRendered = 0;
 const PAGE_SIZE = 50;
+let currentAgentSessionId = null;
 
 function notify(message, type = "info") {
   const toast = document.createElement("div");
@@ -634,8 +635,7 @@ function handleAgentResponseFromSuggestion(data) {
 
   currentSuggestionSession = data?.session_id || null;
   if (els.chatResponse) {
-    els.chatResponse.textContent =
-      data?.answer || "Agent flow started from suggestion.";
+    renderAgentStep(data, true);
   }
 }
 
@@ -734,28 +734,142 @@ async function sendSuggestionMessage(card) {
   }
 }
 
-async function sendChatMessage() {
+function appendAgentBlock(text, className = "") {
+  const container = els.chatResponse;
+  if (!container) return;
+  const div = document.createElement("div");
+  div.className = `agent-block ${className}`.trim();
+  div.textContent = text;
+  container.appendChild(div);
+}
+
+function renderAgentStep(data, reset = false) {
+  const container = els.chatResponse;
+  if (!container || !data) return;
+  if (reset) {
+    container.innerHTML = "";
+  }
+
+  if (data.command_output) {
+    appendAgentBlock(data.command_output, "agent-output");
+  }
+
+  if (data.status === "need_approval") {
+    const block = document.createElement("div");
+    block.className = "agent-block agent-command";
+
+    const reason = document.createElement("p");
+    reason.className = "agent-reason";
+    reason.textContent = data.reason || "Proposed command";
+    block.appendChild(reason);
+
+    const pre = document.createElement("pre");
+    pre.textContent = data.proposed_command || "";
+    block.appendChild(pre);
+
+    const actions = document.createElement("div");
+    actions.className = "agent-actions";
+
+    [
+      { label: "Approve", action: "approve" },
+      { label: "Deny", action: "deny" },
+      { label: "Skip", action: "skip" },
+    ].forEach((btnDef) => {
+      const btn = document.createElement("button");
+      btn.textContent = btnDef.label;
+      btn.dataset.agentAction = btnDef.action;
+      btn.dataset.command = data.proposed_command || "";
+      actions.appendChild(btn);
+    });
+
+    block.appendChild(actions);
+    container.appendChild(block);
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+
+  if (data.status === "running_command") {
+    const block = document.createElement("div");
+    block.className = "agent-block agent-running";
+    block.innerHTML = `<span class="agent-running-indicator"></span> Running…`;
+    container.appendChild(block);
+  }
+
+  if (data.status === "done") {
+    appendAgentBlock(data.final_answer || data.answer || "", "agent-final");
+    currentAgentSessionId = null;
+  }
+}
+
+async function pollNextAgentStep() {
+  if (!currentAgentSessionId) return;
+  let keepGoing = true;
+  while (keepGoing && currentAgentSessionId) {
+    const res = await fetch("/api/agent/step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: currentAgentSessionId, decision: {} }),
+    });
+    const data = await res.json();
+    renderAgentStep(data);
+
+    if (data.status === "intermediate" || data.status === "running_command") {
+      keepGoing = true;
+    } else {
+      keepGoing = false;
+    }
+  }
+}
+
+async function handleAgentDecision(decisionType, commandText) {
+  if (!currentAgentSessionId) return;
+
+  const res = await fetch("/api/agent/step", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: currentAgentSessionId,
+      decision: { type: decisionType, command: commandText },
+    }),
+  });
+  const data = await res.json();
+  renderAgentStep(data);
+  if (data.status === "intermediate" || data.status === "running_command") {
+    await pollNextAgentStep();
+  }
+}
+
+async function startAgentFromChat() {
   const message = (els.chatMessage.value || "").trim();
   if (!message) {
     notify("Please enter a message", "error");
     return;
   }
 
-  const endpoint = els.chatForm?.dataset?.endpoint || "/api/chat";
-  els.chatResponse.textContent = "Typing…";
+  if (els.chatMessage) {
+    els.chatMessage.value = "";
+  }
+
+  currentAgentSessionId = null;
+  if (els.chatResponse) {
+    els.chatResponse.innerHTML = "";
+    appendAgentBlock(message, "agent-user");
+  }
 
   try {
-    const resp = await fetch(endpoint, {
+    const res = await fetch("/api/agent/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ question: message }),
     });
-    if (!resp.ok) throw new Error(`Chat failed: ${resp.status}`);
-    const data = await resp.json();
-    els.chatResponse.textContent = data.answer || "(No response)";
+    const data = await res.json();
+    currentAgentSessionId = data.session_id || null;
+    renderAgentStep(data);
+    if (data.status === "intermediate" || data.status === "running_command") {
+      await pollNextAgentStep();
+    }
   } catch (err) {
     console.error(err);
-    els.chatResponse.textContent = "Failed to get response.";
     notify("Chat request failed", "error");
   }
 }
@@ -814,7 +928,26 @@ function setupChat() {
   if (els.chatSend) {
     els.chatSend.addEventListener("click", (ev) => {
       ev.preventDefault();
-      sendChatMessage();
+      startAgentFromChat();
+    });
+  }
+
+  if (els.chatMessage) {
+    els.chatMessage.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        startAgentFromChat();
+      }
+    });
+  }
+
+  if (els.chatResponse) {
+    els.chatResponse.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("button[data-agent-action]");
+      if (!btn) return;
+      const action = btn.dataset.agentAction;
+      const command = btn.dataset.command || "";
+      await handleAgentDecision(action, command);
     });
   }
 }

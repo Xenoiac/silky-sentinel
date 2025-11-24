@@ -4,6 +4,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 import silky_server
+from fastapi.testclient import TestClient
 
 
 def stub_snapshot():
@@ -67,9 +68,11 @@ def build_client(monkeypatch):
             "exit_code": 0,
         },
     )
-    monkeypatch.setattr(silky_server, "init_agent_state", lambda *a, **k: {"messages": []})
+    monkeypatch.setattr(silky_server, "init_web_agent_state", lambda question: {"messages": []})
     monkeypatch.setattr(
-        silky_server, "agent_step", lambda state, user_decision=None: {"status": "done", "answer": "complete"}
+        silky_server,
+        "web_agent_step",
+        lambda state, user_decision=None: {"status": "done", "final_answer": "complete"},
     )
     monkeypatch.setattr(silky_server, "client", None)
     return TestClient(silky_server.app)
