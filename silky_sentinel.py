@@ -61,6 +61,29 @@ def truncate_for_model(text: str, max_chars: int = 4000) -> str:
     return text[:max_chars] + f"\n\n...[truncated, original length {len(text)} chars]..."
 
 
+def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Build a system prompt for Silky Sentinel's SRE brain.
+
+    The assistant should:
+    - Behave like a senior SRE / DevOps engineer for a Kubernetes platform.
+    - Be cluster-aware and cost-aware (reliability, latency, resource use, and cost).
+    - Answer concisely in 1–4 short sentences.
+    - Explain issues in language understandable by SREs, developers, and managers.
+    - When possible, mention: what was checked, what it means, and the single most important next step.
+    """
+    base = (
+        "You are Silky Sentinel, a senior Site Reliability Engineer for a Kubernetes platform. "
+        "You always answer concisely (1-4 short sentences) and clearly, in language that SREs, developers, and managers can all understand. "
+        "You are cluster-aware and cost-aware: you care about reliability, latency, resource utilization, and cloud cost. "
+        "When you describe a result, mention what you checked, what it means, and the single most important next step, if any. "
+    )
+    if context:
+        # Provide a compact, safe view of context (do not dump huge blobs).
+        base += f"Context summary: {str(context)[:1200]} "
+    return base
+
+
 def ensure_kubeconfig() -> str:
     """Validate kubeconfig path and export it so kubectl always uses it."""
     kubeconfig = os.getenv("KUBECONFIG")
@@ -1357,11 +1380,17 @@ def generate_sre_suggestions(
     if client is None:
         return {"suggestions": []}
 
+    context = {
+        "snapshot": snapshot,
+        "events": events,
+        "latest_report": latest_report,
+    }
     system_prompt = (
-        "You are Silky Sentinel, an SRE copilot. You receive Kubernetes metrics, recent Night Mode "
-        "events, and a high level report. You must respond ONLY with JSON under a 'suggestions' key. "
-        "Each suggestion must have a concrete kubectl or diagnostic command in 'command', and a short "
-        "'action' sentence describing what will be done."
+        build_sre_system_prompt(context)
+        + "You receive Kubernetes metrics, recent Night Mode events, and a high level report. "
+        "You must respond ONLY with JSON under a 'suggestions' key. Each suggestion must have a "
+        "concrete kubectl or diagnostic command in 'command', and a short 'action' sentence describing "
+        "what will be done."
     )
 
     snapshot_block = truncate_for_model(json.dumps(snapshot or {}))
