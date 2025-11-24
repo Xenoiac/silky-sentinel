@@ -1103,6 +1103,82 @@ def generate_night_mode_report() -> tuple[str, str]:
     return report_text, str(report_file)
 
 
+def generate_sre_suggestions(
+    snapshot: dict, events: list, latest_report: str | None
+) -> dict:
+    """
+    Use the existing OpenAI client (LLM_MODEL) via Responses API to generate a small set of SRE suggestions.
+
+    Input:
+      - snapshot: the cluster metrics summary returned by night_collect_cluster_health().
+      - events: recent Night Mode events (already have helpers to read them).
+      - latest_report: text of the most recent Night Mode report, or "".
+
+    Output:
+      - A dict with:
+        {
+          "suggestions": [
+            {
+              "id": "sug-0001",
+              "title": "Scale workers in prod",
+              "reason": "Queue backlog in prod exceeded 10k messages for 15 minutes.",
+              "action": "Scale the 'iacc-worker' deployment in 'prod' from 4 to 6 replicas.",
+              "command": "kubectl scale deployment iacc-worker -n prod --replicas=6",
+              "risk": "medium",   # low | medium | high
+              "category": "capacity" # capacity | reliability | pods | nodes | queues | networking
+            },
+            ...
+          ]
+        }
+
+    The model MUST respond with valid JSON exactly in this shape (no prose).
+    """
+
+    if client is None:
+        return {"suggestions": []}
+
+    system_prompt = (
+        "You are Silky Sentinel, an SRE copilot. You receive Kubernetes metrics, recent Night Mode "
+        "events, and a high level report. You must respond ONLY with JSON under a 'suggestions' key. "
+        "Each suggestion must have a concrete kubectl or diagnostic command in 'command', and a short "
+        "'action' sentence describing what will be done."
+    )
+
+    snapshot_block = truncate_for_model(json.dumps(snapshot or {}))
+    events_block = truncate_for_model(json.dumps(events or []))
+    latest_report_block = truncate_for_model(latest_report or "")
+
+    user_prompt = (
+        "Cluster snapshot:\n"
+        f"{snapshot_block}\n\n"
+        "Recent events:\n"
+        f"{events_block}\n\n"
+        "Latest Night Mode report (text):\n"
+        f"{latest_report_block}"
+    )
+
+    try:
+        response = client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+
+        raw_text = response.output_text.strip()
+        clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_text)
+        if not isinstance(data, dict):
+            return {"suggestions": []}
+        suggestions = data.get("suggestions")
+        if not isinstance(suggestions, list):
+            return {"suggestions": []}
+        return {"suggestions": suggestions}
+    except Exception:
+        return {"suggestions": []}
+
+
 def night_mode_loop(interval_seconds: int = 300, stop_event=None):
     """
     Night Mode:

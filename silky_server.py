@@ -21,6 +21,7 @@ from silky_sentinel import (
     NIGHT_INTERVAL_SECONDS,
     client,
     ensure_kubeconfig,
+    generate_sre_suggestions,
     night_collect_cluster_health,
     night_mode_loop,
     summarize_night_mode,
@@ -155,6 +156,19 @@ def night_summary():
     events = read_night_events(limit=120)
     latest = latest_report_text_or_empty()
     return summarize_night_mode(events, latest)
+
+
+@app.get("/api/sre/suggestions")
+def sre_suggestions():
+    try:
+        ensure_kubeconfig()
+    except Exception as exc:  # pragma: no cover - runtime validation
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    snapshot = night_collect_cluster_health()
+    events = read_night_events(limit=120)
+    latest = latest_report_text_or_empty()
+    return generate_sre_suggestions(snapshot, events, latest)
 
 
 @app.post("/api/night/start")

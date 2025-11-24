@@ -256,6 +256,16 @@
           <h2>Chat Console</h2>
         </div>
 
+        <section class="chat-suggestions">
+          <div class="chat-suggestions-header">
+            <h3>AI SRE Suggestions</h3>
+            <button id="refresh-suggestions" class="pill-btn">Refresh</button>
+          </div>
+          <div id="suggestions-list" class="suggestions-list">
+            <!-- cards inserted by JS -->
+          </div>
+        </section>
+
         <form class="chat-form" id="chat-form" data-endpoint="/api/chat">
           <label for="chat-message">Message</label>
           <textarea id="chat-message" name="message" rows="4" placeholder="Ask Silky Sentinel..."></textarea>
