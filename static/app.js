@@ -50,6 +50,7 @@ const els = {
   chatResponse: document.getElementById("chat-response-text"),
 };
 
+let currentSuggestionSession = null;
 let allPods = [];
 let podsRendered = 0;
 const PAGE_SIZE = 50;
@@ -551,6 +552,64 @@ async function postNightAction(endpoint) {
   }
 }
 
+async function loadSreSuggestions() {
+  const listEl = document.getElementById("suggestions-list");
+  if (!listEl) return;
+  listEl.innerText = "Loading suggestions…";
+
+  try {
+    const res = await fetch("/api/sre/suggestions");
+    const data = await res.json();
+    const suggestions = data.suggestions || [];
+    if (suggestions.length === 0) {
+      listEl.innerText = "No active suggestions. Cluster looks calm.";
+      return;
+    }
+
+    listEl.innerHTML = "";
+    suggestions.forEach((s) => {
+      const card = document.createElement("div");
+      card.className = "suggestion-card";
+      card.dataset.suggestionId = s.id;
+
+      card.innerHTML = `
+        <div class="suggestion-title">${s.title}</div>
+        <div class="suggestion-meta">
+          <span class="suggestion-risk suggestion-risk-${s.risk || "low"}">
+            Risk: ${(s.risk || "low").toUpperCase()}
+          </span>
+          <span class="suggestion-category">${s.category || ""}</span>
+        </div>
+        <p class="suggestion-reason">${s.reason}</p>
+        <p class="suggestion-action"><strong>Action:</strong> ${s.action}</p>
+        <pre class="suggestion-command">${s.command}</pre>
+        <div class="suggestion-actions">
+          <button class="apply-btn">Apply</button>
+          <button class="discuss-btn">Discuss</button>
+          <button class="dismiss-btn">Dismiss</button>
+        </div>
+      `;
+      listEl.appendChild(card);
+    });
+  } catch (err) {
+    listEl.innerText = "Failed to load suggestions.";
+    console.error(err);
+  }
+}
+
+function handleAgentResponseFromSuggestion(data) {
+  if (typeof handleAgentResponse === "function") {
+    handleAgentResponse(data);
+    return;
+  }
+
+  currentSuggestionSession = data?.session_id || null;
+  if (els.chatResponse) {
+    els.chatResponse.textContent =
+      data?.answer || "Agent flow started from suggestion.";
+  }
+}
+
 async function sendChatMessage() {
   const message = (els.chatMessage.value || "").trim();
   if (!message) {
@@ -638,6 +697,66 @@ function setupChat() {
   }
 }
 
+function setupSuggestions() {
+  const refreshBtn = document.getElementById("refresh-suggestions");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      loadSreSuggestions();
+    });
+  }
+
+  const listEl = document.getElementById("suggestions-list");
+  if (listEl) {
+    listEl.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const card = e.target.closest("suggestion-card") || e.target.closest(".suggestion-card");
+      if (!card) return;
+
+      const id = card.dataset.suggestionId;
+      const title = card.querySelector(".suggestion-title")?.innerText || "";
+      const reason = card.querySelector(".suggestion-reason")?.innerText || "";
+      const actionText = card.querySelector(".suggestion-action")?.innerText || "";
+      const command = card.querySelector(".suggestion-command")?.innerText || "";
+
+      if (btn.classList.contains("dismiss-btn")) {
+        card.remove();
+        return;
+      }
+
+      if (btn.classList.contains("discuss-btn")) {
+        const textarea = document.getElementById("chat-message");
+        if (textarea) {
+          textarea.value = `About suggestion "${title}": ${reason}\n\nRecommended action: ${actionText}\n\nCan we review this and check if it's the best fix?`;
+          textarea.focus();
+        }
+        return;
+      }
+
+      if (btn.classList.contains("apply-btn")) {
+        try {
+          const res = await fetch("/api/agent/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question: `Apply remediation for suggestion "${title}". Reason: ${reason}. Recommended action: ${actionText}. Command to run: ${command}.`,
+              suggestion_id: id,
+            }),
+          });
+          const data = await res.json();
+          handleAgentResponseFromSuggestion(data);
+        } catch (err) {
+          console.error("Failed to start agent from suggestion", err);
+          notify("Failed to start agent for suggestion", "error");
+        }
+      }
+    });
+  }
+
+  loadSreSuggestions();
+}
+
 function startPolling() {
   setInterval(loadClusterPods, REFRESH_INTERVAL_MS);
   setInterval(loadNightStatus, REFRESH_INTERVAL_MS);
@@ -657,5 +776,6 @@ window.addEventListener("DOMContentLoaded", () => {
   setupModal();
   setupExpanders();
   setupChat();
+  setupSuggestions();
   startPolling();
 });
