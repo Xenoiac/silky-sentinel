@@ -118,6 +118,73 @@ def latest_report_text_or_empty() -> str:
         return ""
 
 
+def _format_agent_step_response(session_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a lightweight response for the web console."""
+
+    response: Dict[str, Any] = {
+        "session_id": session_id,
+        "status": result.get("status"),
+    }
+
+    action = result.get("action")
+    if action:
+        response["action"] = action
+
+    if result.get("status") == "need_approval":
+        response.update(
+            {
+                "command": result.get("command"),
+                "reason": result.get("reason"),
+                "log_path": result.get("log_path"),
+                "keywords": result.get("keywords"),
+                "context_lines": result.get("context_lines"),
+                "max_snippets": result.get("max_snippets"),
+            }
+        )
+
+    if result.get("status") == "intermediate":
+        response["note"] = result.get("note")
+
+    if result.get("status") == "done":
+        response["final_answer"] = result.get("final_answer")
+
+    ran = result.get("ran")
+    if ran:
+        response["ran"] = ran
+        if ran.get("type") == "command":
+            response["command_summary"] = ran.get("summary")
+
+    return response
+
+
+def _normalize_user_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
+    """Massage client decisions into the format expected by the agent engine."""
+
+    if not decision:
+        return {}
+
+    normalized = dict(decision)
+    decision_type = normalized.get("type")
+    action = normalized.get("action")
+    command = normalized.get("command")
+    log_path = normalized.get("log_path")
+
+    if decision_type in {"approve", "deny"}:
+        if not action and command:
+            action = "run_command"
+        proposal: Dict[str, Any] = {
+            "action": action,
+            "command": command,
+            "log_path": log_path,
+            "keywords": normalized.get("keywords"),
+            "context_lines": normalized.get("context_lines"),
+            "max_snippets": normalized.get("max_snippets"),
+        }
+        normalized["proposal"] = proposal
+
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -393,11 +460,10 @@ def agent_start(payload: dict):
         raise HTTPException(status_code=400, detail="question is required")
 
     state = init_web_agent_state(question)
-    result = web_agent_step(state, user_decision=None)
     session_id = str(uuid4())
+    result = web_agent_step(state, user_decision=None)
     agent_sessions[session_id] = state
-    result["session_id"] = session_id
-    return result
+    return _format_agent_step_response(session_id, result)
 
 
 @app.post("/api/agent/step")
@@ -406,15 +472,17 @@ def agent_step_api(payload: dict):
     decision = (payload or {}).get("decision")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
+    if decision is None:
+        raise HTTPException(status_code=400, detail="decision is required")
 
     state = agent_sessions.get(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="session not found")
 
-    result = web_agent_step(state, user_decision=decision)
+    normalized_decision = _normalize_user_decision(decision)
+    result = web_agent_step(state, user_decision=normalized_decision)
     agent_sessions[session_id] = state
-    result["session_id"] = session_id
-    return result
+    return _format_agent_step_response(session_id, result)
 
 
 # Run with: uvicorn silky_server:app --reload
