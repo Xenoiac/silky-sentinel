@@ -2,6 +2,7 @@ const REFRESH_INTERVAL_MS = 30000;
 
 const els = {
   lastSeverity: document.getElementById("last-severity"),
+  lastRefresh: document.getElementById("last-refresh"),
   podsTableBody: document.getElementById("pods-table-body"),
   cpuPercent: document.getElementById("cpu-percent"),
   cpuFill: document.getElementById("cpu-fill"),
@@ -9,12 +10,23 @@ const els = {
   memoryPercent: document.getElementById("memory-percent"),
   memoryFill: document.getElementById("memory-fill"),
   memoryDetail: document.getElementById("memory-detail"),
+  storagePercent: document.getElementById("storage-percent"),
+  storageFill: document.getElementById("storage-fill"),
+  storageDetail: document.getElementById("storage-detail"),
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-fill"),
   podsDetail: document.getElementById("pods-detail"),
   nodesPercent: document.getElementById("nodes-percent"),
   nodesFill: document.getElementById("nodes-fill"),
   nodesDetail: document.getElementById("nodes-detail"),
+  alertIncidents: document.getElementById("alert-incidents"),
+  alertQueues: document.getElementById("alert-queues"),
+  nsTopCpu: document.getElementById("ns-top-cpu"),
+  nsTopMemory: document.getElementById("ns-top-memory"),
+  nsUnhealthy: document.getElementById("ns-unhealthy"),
+  podsTotalPill: document.getElementById("pods-total-pill"),
+  errorBanner: document.getElementById("cluster-errors"),
+  errorList: document.getElementById("error-list"),
   nightStatusText: document.getElementById("night-status-text"),
   nightStatusIndicator: document.getElementById("night-status-indicator"),
   nightEventsLog: document.getElementById("night-events-log"),
@@ -105,6 +117,25 @@ function setStatusIndicator(running) {
   }
 }
 
+function renderNamespaceRows(target, rows, emptyText = "No data") {
+  if (!target) return;
+  target.innerHTML = "";
+  const columnCount = target.closest("table")?.querySelectorAll("th").length || 3;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="${columnCount}" class="muted">${emptyText}</td>`;
+    target.appendChild(tr);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = Object.values(row).map((val) => (val ?? "").toString());
+    tr.innerHTML = values.map((val) => `<td>${val}</td>`).join("");
+    target.appendChild(tr);
+  });
+}
+
 async function loadClusterPods() {
   try {
     const resp = await fetch("/api/cluster/pods");
@@ -115,13 +146,14 @@ async function loadClusterPods() {
     const nodes = summary.nodes || {};
     const cpu = summary.cpu || {};
     const memory = summary.memory || {};
+    const storage = summary.storage || {};
+    const podsSummary = summary.pods || {};
+    const alerts = summary.alerts || {};
+    const queues = summary.queues || {};
 
-    const total = summary.total_pods ?? pods.length;
-    const bad =
-      summary.bad_pods ??
-      pods.filter(
-        (p) => (p.status !== "Running" && p.status !== "Completed") || Number(p.restarts) > 5,
-      ).length;
+    if (els.lastRefresh) {
+      els.lastRefresh.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
 
     setGauge(
       { fill: els.cpuFill, value: els.cpuPercent, text: els.cpuDetail },
@@ -135,11 +167,19 @@ async function loadClusterPods() {
       `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
     );
 
+    setGauge(
+      { fill: els.storageFill, value: els.storagePercent, text: els.storageDetail },
+      Number(storage.utilization_percent ?? 0),
+      `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`,
+    );
+
+    const total = podsSummary.total ?? pods.length;
+    const bad = podsSummary.unhealthy ?? 0;
     const badPercent = total > 0 ? (bad / total) * 100 : 0;
     setGauge(
       { fill: els.podsFill, value: els.podsPercent, text: els.podsDetail },
-      badPercent,
-      `${bad} bad of ${total} pods`,
+      podsSummary.unhealthy_percent ?? badPercent,
+      `${bad} unhealthy of ${total} pods`,
     );
 
     const notReady = nodes.not_ready ?? 0;
@@ -152,6 +192,53 @@ async function loadClusterPods() {
       `${ready} ready / ${notReady} not-ready`,
     );
 
+    if (els.lastSeverity) {
+      const severity = alerts.last_severity || "—";
+      els.lastSeverity.textContent = severity === "—" ? "—" : severity.toString().toUpperCase();
+    }
+    if (els.alertIncidents) {
+      const incidents = alerts.open_incidents ?? 0;
+      els.alertIncidents.textContent = `Open incidents: ${incidents}`;
+    }
+    if (els.alertQueues) {
+      const enabled = queues.enabled === true;
+      const totalBacklog = queues.total_backlog ?? 0;
+      els.alertQueues.textContent = enabled
+        ? `Queues backlog: ${totalBacklog}`
+        : "Queues disabled";
+    }
+
+    if (els.podsTotalPill) {
+      els.podsTotalPill.textContent = `${total} pods`;
+    }
+
+    renderNamespaceRows(
+      els.nsTopCpu,
+      (data.namespaces?.top_by_cpu || []).map((item) => ({
+        Namespace: item.namespace || "",
+        "CPU (m)": item.cpu_mcores ?? 0,
+        Pods: item.pods ?? 0,
+      })),
+    );
+
+    renderNamespaceRows(
+      els.nsTopMemory,
+      (data.namespaces?.top_by_memory || []).map((item) => ({
+        Namespace: item.namespace || "",
+        "Memory (Mi)": item.memory_mib ?? 0,
+        Pods: item.pods ?? 0,
+      })),
+    );
+
+    renderNamespaceRows(
+      els.nsUnhealthy,
+      (data.namespaces?.unhealthy_counts || []).map((item) => ({
+        Namespace: item.namespace || "",
+        Unhealthy: item.unhealthy_pods ?? 0,
+      })),
+      "All namespaces healthy",
+    );
+
     els.podsTableBody.innerHTML = "";
     pods.forEach((pod) => {
       const tr = document.createElement("tr");
@@ -160,9 +247,26 @@ async function loadClusterPods() {
         <td>${pod.name || ""}</td>
         <td>${pod.status || ""}</td>
         <td>${pod.restarts ?? ""}</td>
+        <td>${pod.age || ""}</td>
+        <td>${pod.node || ""}</td>
       `;
       els.podsTableBody.appendChild(tr);
     });
+
+    const errorList = Array.isArray(data.errors) ? data.errors : [];
+    if (els.errorBanner && els.errorList) {
+      els.errorList.innerHTML = "";
+      if (errorList.length) {
+        els.errorBanner.hidden = false;
+        errorList.forEach((err) => {
+          const li = document.createElement("li");
+          li.textContent = err;
+          els.errorList.appendChild(li);
+        });
+      } else {
+        els.errorBanner.hidden = true;
+      }
+    }
   } catch (err) {
     console.error(err);
     notify("Failed to load cluster pods", "error");

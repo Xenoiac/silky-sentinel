@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import shutil
 import subprocess
 import requests
 import re
@@ -501,13 +502,31 @@ def log_night_event(snapshot: dict, analysis: dict):
         print(f"Failed to write night mode log: {e}")
 
 
+def _latest_night_severity(default: str = "UNKNOWN") -> str:
+    if not NIGHT_LOG_PATH.exists():
+        return default
+
+    try:
+        last_line = None
+        with open(NIGHT_LOG_PATH, "r") as f:
+            for line in f:
+                if line.strip():
+                    last_line = line
+
+        if not last_line:
+            return default
+
+        data = json.loads(last_line)
+        analysis = data.get("analysis", {}) if isinstance(data, dict) else {}
+        severity = analysis.get("severity") or default
+        return severity.upper()
+    except Exception:
+        return default
+
+
 def night_collect_cluster_health() -> dict:
     snapshot = {
-        "pods": [],
         "summary": {
-            "total_pods": 0,
-            "bad_pods": 0,
-            "nodes": {"count": 0, "ready": 0, "not_ready": 0},
             "cpu": {
                 "total_cores": 0.0,
                 "used_cores": 0.0,
@@ -518,7 +537,31 @@ def night_collect_cluster_health() -> dict:
                 "used_gib": 0.0,
                 "utilization_percent": 0.0,
             },
+            "storage": {
+                "total_gib": 0.0,
+                "used_gib": 0.0,
+                "utilization_percent": 0.0,
+            },
+            "pods": {
+                "total": 0,
+                "unhealthy": 0,
+                "unhealthy_percent": 0.0,
+                "by_status": {},
+            },
+            "nodes": {"count": 0, "ready": 0, "not_ready": 0},
+            "alerts": {"last_severity": _latest_night_severity(), "open_incidents": 0},
+            "queues": {
+                "enabled": False,
+                "total_backlog": 0,
+                "top_queues": [],
+            },
         },
+        "namespaces": {
+            "top_by_cpu": [],
+            "top_by_memory": [],
+            "unhealthy_counts": [],
+        },
+        "pods": [],
         "errors": [],
     }
 
@@ -567,15 +610,16 @@ def night_collect_cluster_health() -> dict:
             return 0.0
 
     # Pods
-    pods_cmd = "kubectl get pods -A --no-headers"
+    pods_cmd = "kubectl get pods -A -o wide --no-headers"
     pods_result = run_shell_command(pods_cmd)
 
     if pods_result["exit_code"] != 0:
         snapshot["errors"].append(
-            {"collector": "pods", "error": pods_result["stderr"] or "unknown error"}
+            f"pods collector failed: {pods_result['stderr'] or 'unknown error'}"
         )
     else:
         lines = pods_result["stdout"].splitlines()
+        status_counts = {}
         total = 0
         bad = 0
 
@@ -592,6 +636,9 @@ def night_collect_cluster_health() -> dict:
                 parts[4],
             )
 
+            age = parts[5] if len(parts) > 5 else ""
+            node = parts[7] if len(parts) > 7 else None
+
             try:
                 restarts = int(restarts)
             except Exception:
@@ -600,28 +647,54 @@ def night_collect_cluster_health() -> dict:
             pod = {
                 "namespace": ns,
                 "name": name,
-                "ready": ready,
                 "status": status,
                 "restarts": restarts,
+                "age": age,
+                "node": node,
+                "reason": None,
             }
             snapshot["pods"].append(pod)
 
             total += 1
+            status_counts[status] = status_counts.get(status, 0) + 1
             if status not in ("Running", "Completed") or restarts > 5:
                 bad += 1
 
-        snapshot["summary"]["total_pods"] = total
-        snapshot["summary"]["bad_pods"] = bad
+        bad_percent = (bad / total * 100) if total > 0 else 0.0
+        snapshot["summary"]["pods"] = {
+            "total": total,
+            "unhealthy": bad,
+            "unhealthy_percent": round(bad_percent, 2),
+            "by_status": status_counts,
+        }
+
+    try:
+        if NIGHT_LOG_PATH.exists():
+            with open(NIGHT_LOG_PATH, "r") as f:
+                recent = f.readlines()[-30:]
+            incidents = 0
+            for line in recent:
+                try:
+                    parsed = json.loads(line)
+                    sev = (
+                        parsed.get("analysis", {}).get("severity")
+                        if isinstance(parsed, dict)
+                        else None
+                    )
+                    if sev and str(sev).lower() in {"medium", "high", "critical"}:
+                        incidents += 1
+                except Exception:
+                    continue
+            snapshot["summary"]["alerts"]["open_incidents"] = incidents
+    except Exception:
+        pass
 
     # Node readiness counts
     nodes_cmd = "kubectl get nodes --no-headers"
     nodes_result = run_shell_command(nodes_cmd)
     if nodes_result["exit_code"] != 0:
         snapshot["errors"].append(
-            {
-                "collector": "nodes",
-                "error": nodes_result["stderr"] or "unknown error",
-            }
+            f"nodes collector failed: {nodes_result['stderr'] or 'unknown error'}"
         )
     else:
         ready = 0
@@ -649,10 +722,7 @@ def night_collect_cluster_health() -> dict:
     mem_total_gib = 0.0
     if nodes_json_result["exit_code"] != 0:
         snapshot["errors"].append(
-            {
-                "collector": "nodes_json",
-                "error": nodes_json_result["stderr"] or "unknown error",
-            }
+            f"nodes_json collector failed: {nodes_json_result['stderr'] or 'unknown error'}"
         )
     else:
         try:
@@ -667,9 +737,7 @@ def night_collect_cluster_health() -> dict:
                 cpu_total += parse_cpu_quantity(capacity.get("cpu"))
                 mem_total_gib += parse_memory_to_gib(capacity.get("memory"))
         except Exception as exc:
-            snapshot["errors"].append(
-                {"collector": "nodes_json", "error": f"parse error: {exc}"}
-            )
+            snapshot["errors"].append(f"nodes_json parse error: {exc}")
 
     # Utilization from kubectl top
     top_nodes_cmd = "kubectl top nodes"
@@ -678,10 +746,7 @@ def night_collect_cluster_health() -> dict:
     mem_used_gib = 0.0
     if top_nodes_result["exit_code"] != 0:
         snapshot["errors"].append(
-            {
-                "collector": "top_nodes",
-                "error": top_nodes_result["stderr"] or "unknown error",
-            }
+            f"top_nodes collector failed: {top_nodes_result['stderr'] or 'unknown error'}"
         )
     else:
         lines = top_nodes_result["stdout"].splitlines()
@@ -706,6 +771,80 @@ def night_collect_cluster_health() -> dict:
         "used_gib": round(mem_used_gib, 2),
         "utilization_percent": round(mem_util, 2),
     }
+
+    # Namespace leaderboards from kubectl top pods
+    top_pods_cmd = "kubectl top pods -A --no-headers"
+    top_pods_result = run_shell_command(top_pods_cmd)
+    ns_cpu = {}
+    ns_mem = {}
+    if top_pods_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            f"top_pods collector failed: {top_pods_result['stderr'] or 'unknown error'}"
+        )
+    else:
+        for line in top_pods_result["stdout"].splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            ns, _, cpu_raw, mem_raw = parts[0], parts[1], parts[2], parts[3]
+            cpu_mcores = round(parse_cpu_quantity(cpu_raw) * 1000, 2)
+            mem_mib = round(parse_memory_to_gib(mem_raw) * 1024, 2)
+            ns_cpu[ns] = ns_cpu.get(ns, 0) + cpu_mcores
+            ns_mem[ns] = ns_mem.get(ns, 0) + mem_mib
+
+    top_cpu = sorted(ns_cpu.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    top_mem = sorted(ns_mem.items(), key=lambda kv: kv[1], reverse=True)[:5]
+
+    pods_per_namespace = {}
+    for pod in snapshot["pods"]:
+        pods_per_namespace[pod["namespace"]] = pods_per_namespace.get(
+            pod["namespace"], 0
+        ) + 1
+
+    snapshot["namespaces"]["top_by_cpu"] = [
+        {
+            "namespace": ns,
+            "cpu_mcores": cpu,
+            "pods": pods_per_namespace.get(ns, 0),
+        }
+        for ns, cpu in top_cpu
+    ]
+    snapshot["namespaces"]["top_by_memory"] = [
+        {
+            "namespace": ns,
+            "memory_mib": mem,
+            "pods": pods_per_namespace.get(ns, 0),
+        }
+        for ns, mem in top_mem
+    ]
+
+    unhealthy_by_namespace = {}
+    for pod in snapshot["pods"]:
+        if pod["status"] not in ("Running", "Completed") or pod["restarts"] > 5:
+            unhealthy_by_namespace[pod["namespace"]] = (
+                unhealthy_by_namespace.get(pod["namespace"], 0) + 1
+            )
+
+    snapshot["namespaces"]["unhealthy_counts"] = [
+        {"namespace": ns, "unhealthy_pods": count}
+        for ns, count in sorted(
+            unhealthy_by_namespace.items(), key=lambda kv: kv[1], reverse=True
+        )
+    ]
+
+    # Storage snapshot (local disk approximation)
+    try:
+        usage = shutil.disk_usage("/")
+        total_gib = usage.total / (1024**3)
+        used_gib = usage.used / (1024**3)
+        storage_util = (used_gib / total_gib * 100) if total_gib else 0.0
+        snapshot["summary"]["storage"] = {
+            "total_gib": round(total_gib, 2),
+            "used_gib": round(used_gib, 2),
+            "utilization_percent": round(storage_util, 2),
+        }
+    except Exception as exc:
+        snapshot["errors"].append(f"storage collector failed: {exc}")
 
     return snapshot
 
@@ -824,9 +963,13 @@ def generate_night_mode_report() -> tuple[str, str]:
         lines.append(f"  - {sev}: {count} cycle(s)")
     lines.append("")
 
+    pods_summary = last_summary.get("pods", {}) if isinstance(last_summary, dict) else {}
     lines.append("Last snapshot cluster summary:")
-    lines.append(f"  - Total pods : {last_summary.get('total_pods', 'N/A')}")
-    lines.append(f"  - Bad pods   : {last_summary.get('bad_pods', 'N/A')}")
+    lines.append(f"  - Total pods       : {pods_summary.get('total', 'N/A')}")
+    lines.append(f"  - Unhealthy pods   : {pods_summary.get('unhealthy', 'N/A')}")
+    lines.append(
+        f"  - Unhealthy percent: {pods_summary.get('unhealthy_percent', 'N/A')}%"
+    )
     lines.append("")
 
     lines.append("Last analysis from Night Mode:")

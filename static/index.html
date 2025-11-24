@@ -14,63 +14,129 @@
   <main class="layout">
     <section class="panel" id="cluster-overview">
       <div class="panel-header">
-        <h2>Cluster Overview</h2>
+        <div>
+          <p class="eyebrow">SRE Dashboard</p>
+          <h2>Cluster Overview</h2>
+          <p class="subtle">Grafana-inspired layout with richer telemetry.</p>
+        </div>
+        <div class="pill" id="last-refresh">Awaiting data…</div>
       </div>
 
-      <div class="gauge-grid">
-        <article class="gauge-card" id="card-cpu">
-          <div class="gauge-header">
+      <div class="stat-grid">
+        <article class="stat-card" id="card-cpu">
+          <div class="stat-top">
             <p class="label">CPU Utilization</p>
             <p class="value" id="cpu-percent">0%</p>
           </div>
           <div class="gauge-bar" aria-hidden="true">
             <div class="gauge-fill" id="cpu-fill"></div>
           </div>
-          <div class="gauge-footer" id="cpu-detail">0 / 0 cores</div>
+          <p class="muted" id="cpu-detail">0 / 0 cores</p>
         </article>
 
-        <article class="gauge-card" id="card-memory">
-          <div class="gauge-header">
+        <article class="stat-card" id="card-memory">
+          <div class="stat-top">
             <p class="label">Memory Utilization</p>
             <p class="value" id="memory-percent">0%</p>
           </div>
           <div class="gauge-bar" aria-hidden="true">
             <div class="gauge-fill" id="memory-fill"></div>
           </div>
-          <div class="gauge-footer" id="memory-detail">0 / 0 GiB</div>
+          <p class="muted" id="memory-detail">0 / 0 GiB</p>
         </article>
 
-        <article class="gauge-card" id="card-pods">
-          <div class="gauge-header">
-            <p class="label">Pods Health (bad)</p>
+        <article class="stat-card" id="card-storage">
+          <div class="stat-top">
+            <p class="label">Storage Utilization</p>
+            <p class="value" id="storage-percent">0%</p>
+          </div>
+          <div class="gauge-bar" aria-hidden="true">
+            <div class="gauge-fill" id="storage-fill"></div>
+          </div>
+          <p class="muted" id="storage-detail">0 / 0 GiB</p>
+        </article>
+
+        <article class="stat-card" id="card-pods">
+          <div class="stat-top">
+            <p class="label">Unhealthy Pods</p>
             <p class="value" id="pods-percent">0%</p>
           </div>
           <div class="gauge-bar" aria-hidden="true">
             <div class="gauge-fill" id="pods-fill"></div>
           </div>
-          <div class="gauge-footer" id="pods-detail">0 bad of 0 pods</div>
+          <p class="muted" id="pods-detail">0 unhealthy of 0 pods</p>
         </article>
 
-        <article class="gauge-card" id="card-nodes">
-          <div class="gauge-header">
-            <p class="label">Node Readiness (not-ready)</p>
+        <article class="stat-card" id="card-nodes">
+          <div class="stat-top">
+            <p class="label">Node Readiness</p>
             <p class="value" id="nodes-percent">0%</p>
           </div>
           <div class="gauge-bar" aria-hidden="true">
             <div class="gauge-fill" id="nodes-fill"></div>
           </div>
-          <div class="gauge-footer" id="nodes-detail">0 ready / 0 not-ready</div>
+          <p class="muted" id="nodes-detail">0 ready / 0 not-ready</p>
+        </article>
+
+        <article class="stat-card" id="card-alerts">
+          <div class="stat-top">
+            <p class="label">Alerting</p>
+            <p class="value" id="last-severity">—</p>
+          </div>
+          <p class="muted" id="alert-incidents">Open incidents: 0</p>
+          <p class="muted" id="alert-queues">Queues disabled</p>
         </article>
       </div>
 
-      <div class="card-grid solo">
-        <article class="card" id="card-last-severity">
-          <p class="label">Last Severity</p>
-          <p class="value" id="last-severity">—</p>
+      <div class="panel-subgrid">
+        <article class="mini-panel">
+          <header class="mini-panel-header">
+            <h3>Namespaces by CPU</h3>
+            <span class="pill subtle-pill">Top 5</span>
+          </header>
+          <table class="compact-table">
+            <thead>
+              <tr><th>Namespace</th><th>CPU (m)</th><th>Pods</th></tr>
+            </thead>
+            <tbody id="ns-top-cpu"></tbody>
+          </table>
+        </article>
+
+        <article class="mini-panel">
+          <header class="mini-panel-header">
+            <h3>Namespaces by Memory</h3>
+            <span class="pill subtle-pill">Top 5</span>
+          </header>
+          <table class="compact-table">
+            <thead>
+              <tr><th>Namespace</th><th>Memory (Mi)</th><th>Pods</th></tr>
+            </thead>
+            <tbody id="ns-top-memory"></tbody>
+          </table>
+        </article>
+
+        <article class="mini-panel">
+          <header class="mini-panel-header">
+            <h3>Unhealthy Pods by Namespace</h3>
+            <span class="pill subtle-pill">Live</span>
+          </header>
+          <table class="compact-table">
+            <thead>
+              <tr><th>Namespace</th><th>Unhealthy</th></tr>
+            </thead>
+            <tbody id="ns-unhealthy"></tbody>
+          </table>
         </article>
       </div>
 
       <div class="table-container">
+        <header class="table-header">
+          <div>
+            <p class="label">Cluster Explorer</p>
+            <h3>Pods inventory</h3>
+          </div>
+          <div class="pill soft" id="pods-total-pill">0 pods</div>
+        </header>
         <table class="pods-table">
           <thead>
             <tr>
@@ -78,12 +144,19 @@
               <th>Name</th>
               <th>Status</th>
               <th>Restarts</th>
+              <th>Age</th>
+              <th>Node</th>
             </tr>
           </thead>
           <tbody id="pods-table-body">
             <!-- Populated by /static/app.js -->
           </tbody>
         </table>
+      </div>
+
+      <div class="error-banner" id="cluster-errors" hidden>
+        <strong>Collectors:</strong>
+        <ul id="error-list"></ul>
       </div>
     </section>
 
