@@ -1,10 +1,20 @@
 const REFRESH_INTERVAL_MS = 30000;
 
 const els = {
-  totalPods: document.getElementById("total-pods"),
-  badPods: document.getElementById("bad-pods"),
   lastSeverity: document.getElementById("last-severity"),
   podsTableBody: document.getElementById("pods-table-body"),
+  cpuPercent: document.getElementById("cpu-percent"),
+  cpuFill: document.getElementById("cpu-fill"),
+  cpuDetail: document.getElementById("cpu-detail"),
+  memoryPercent: document.getElementById("memory-percent"),
+  memoryFill: document.getElementById("memory-fill"),
+  memoryDetail: document.getElementById("memory-detail"),
+  podsPercent: document.getElementById("pods-percent"),
+  podsFill: document.getElementById("pods-fill"),
+  podsDetail: document.getElementById("pods-detail"),
+  nodesPercent: document.getElementById("nodes-percent"),
+  nodesFill: document.getElementById("nodes-fill"),
+  nodesDetail: document.getElementById("nodes-detail"),
   nightStatusText: document.getElementById("night-status-text"),
   nightStatusIndicator: document.getElementById("night-status-indicator"),
   nightEventsLog: document.getElementById("night-events-log"),
@@ -57,6 +67,29 @@ function severityTone(level = "") {
   return "info";
 }
 
+function gaugeTone(percent = 0) {
+  if (percent > 90) return "tone-red";
+  if (percent > 80) return "tone-orange";
+  if (percent > 60) return "tone-yellow";
+  return "tone-green";
+}
+
+function setGauge({ fill, value, text }, percent = 0, detail = "") {
+  const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+  const tone = gaugeTone(safePercent);
+  if (fill) {
+    fill.style.width = `${safePercent}%`;
+    fill.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
+    fill.classList.add(tone);
+  }
+  if (value) {
+    value.textContent = `${safePercent.toFixed(1)}%`;
+  }
+  if (text) {
+    text.textContent = detail;
+  }
+}
+
 function setStatusIndicator(running) {
   const indicator = els.nightStatusIndicator;
   indicator.classList.remove("running", "stopped", "idle");
@@ -79,6 +112,9 @@ async function loadClusterPods() {
     const data = await resp.json();
     const pods = Array.isArray(data.pods) ? data.pods : [];
     const summary = data.summary || {};
+    const nodes = summary.nodes || {};
+    const cpu = summary.cpu || {};
+    const memory = summary.memory || {};
 
     const total = summary.total_pods ?? pods.length;
     const bad =
@@ -87,8 +123,34 @@ async function loadClusterPods() {
         (p) => (p.status !== "Running" && p.status !== "Completed") || Number(p.restarts) > 5,
       ).length;
 
-    els.totalPods.textContent = total;
-    els.badPods.textContent = bad;
+    setGauge(
+      { fill: els.cpuFill, value: els.cpuPercent, text: els.cpuDetail },
+      Number(cpu.utilization_percent ?? 0),
+      `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`,
+    );
+
+    setGauge(
+      { fill: els.memoryFill, value: els.memoryPercent, text: els.memoryDetail },
+      Number(memory.utilization_percent ?? 0),
+      `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
+    );
+
+    const badPercent = total > 0 ? (bad / total) * 100 : 0;
+    setGauge(
+      { fill: els.podsFill, value: els.podsPercent, text: els.podsDetail },
+      badPercent,
+      `${bad} bad of ${total} pods`,
+    );
+
+    const notReady = nodes.not_ready ?? 0;
+    const ready = nodes.ready ?? 0;
+    const nodeTotal = nodes.count ?? ready + notReady;
+    const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
+    setGauge(
+      { fill: els.nodesFill, value: els.nodesPercent, text: els.nodesDetail },
+      notReadyPercent,
+      `${ready} ready / ${notReady} not-ready`,
+    );
 
     els.podsTableBody.innerHTML = "";
     pods.forEach((pod) => {

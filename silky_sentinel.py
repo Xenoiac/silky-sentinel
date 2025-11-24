@@ -502,47 +502,211 @@ def log_night_event(snapshot: dict, analysis: dict):
 
 
 def night_collect_cluster_health() -> dict:
-    snapshot = {"pods": [], "summary": {}, "errors": []}
+    snapshot = {
+        "pods": [],
+        "summary": {
+            "total_pods": 0,
+            "bad_pods": 0,
+            "nodes": {"count": 0, "ready": 0, "not_ready": 0},
+            "cpu": {
+                "total_cores": 0.0,
+                "used_cores": 0.0,
+                "utilization_percent": 0.0,
+            },
+            "memory": {
+                "total_gib": 0.0,
+                "used_gib": 0.0,
+                "utilization_percent": 0.0,
+            },
+        },
+        "errors": [],
+    }
 
-    cmd = "kubectl get pods -A --no-headers"
-    result = run_shell_command(cmd)
-
-    if result["exit_code"] != 0:
-        snapshot["errors"].append(
-            {"collector": "pods", "error": result["stderr"] or "unknown error"}
-        )
-        return snapshot
-
-    lines = result["stdout"].splitlines()
-    total = 0
-    bad = 0
-
-    for line in lines:
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-
-        ns, name, ready, status, restarts = parts[0], parts[1], parts[2], parts[3], parts[4]
-
+    def parse_cpu_quantity(value: str) -> float:
+        if value is None:
+            return 0.0
         try:
-            restarts = int(restarts)
-        except:
-            restarts = -1
+            if isinstance(value, (int, float)):
+                return float(value)
+            value = str(value).strip()
+            if value.endswith("m"):
+                return float(value[:-1]) / 1000
+            return float(value)
+        except Exception:
+            return 0.0
 
-        pod = {
-            "namespace": ns,
-            "name": name,
+    def parse_memory_to_gib(value: str) -> float:
+        if value is None:
+            return 0.0
+        try:
+            value = str(value).strip()
+            multiplier = 1
+            if value.lower().endswith("ki"):
+                multiplier = 1 / (1024 * 1024)
+                value = value[:-2]
+            elif value.lower().endswith("mi"):
+                multiplier = 1 / 1024
+                value = value[:-2]
+            elif value.lower().endswith("gi"):
+                multiplier = 1
+                value = value[:-2]
+            elif value.lower().endswith("ti"):
+                multiplier = 1024
+                value = value[:-2]
+            elif value.lower().endswith("k"):
+                multiplier = 1 / (1024 * 1024)
+                value = value[:-1]
+            elif value.lower().endswith("m"):
+                multiplier = 1 / 1024
+                value = value[:-1]
+            elif value.lower().endswith("g"):
+                multiplier = 1
+                value = value[:-1]
+            return float(value) * multiplier
+        except Exception:
+            return 0.0
+
+    # Pods
+    pods_cmd = "kubectl get pods -A --no-headers"
+    pods_result = run_shell_command(pods_cmd)
+
+    if pods_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            {"collector": "pods", "error": pods_result["stderr"] or "unknown error"}
+        )
+    else:
+        lines = pods_result["stdout"].splitlines()
+        total = 0
+        bad = 0
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+
+            ns, name, ready, status, restarts = (
+                parts[0],
+                parts[1],
+                parts[2],
+                parts[3],
+                parts[4],
+            )
+
+            try:
+                restarts = int(restarts)
+            except Exception:
+                restarts = -1
+
+            pod = {
+                "namespace": ns,
+                "name": name,
+                "ready": ready,
+                "status": status,
+                "restarts": restarts,
+            }
+            snapshot["pods"].append(pod)
+
+            total += 1
+            if status not in ("Running", "Completed") or restarts > 5:
+                bad += 1
+
+        snapshot["summary"]["total_pods"] = total
+        snapshot["summary"]["bad_pods"] = bad
+
+    # Node readiness counts
+    nodes_cmd = "kubectl get nodes --no-headers"
+    nodes_result = run_shell_command(nodes_cmd)
+    if nodes_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            {
+                "collector": "nodes",
+                "error": nodes_result["stderr"] or "unknown error",
+            }
+        )
+    else:
+        ready = 0
+        not_ready = 0
+        for line in nodes_result["stdout"].splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            status = parts[1]
+            if status.startswith("Ready"):
+                ready += 1
+            else:
+                not_ready += 1
+
+        snapshot["summary"]["nodes"] = {
+            "count": ready + not_ready,
             "ready": ready,
-            "status": status,
-            "restarts": restarts,
+            "not_ready": not_ready,
         }
-        snapshot["pods"].append(pod)
 
-        total += 1
-        if status not in ("Running", "Completed") or restarts > 5:
-            bad += 1
+    # Capacity from node JSON
+    nodes_json_cmd = "kubectl get nodes -o json"
+    nodes_json_result = run_shell_command(nodes_json_cmd)
+    cpu_total = 0.0
+    mem_total_gib = 0.0
+    if nodes_json_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            {
+                "collector": "nodes_json",
+                "error": nodes_json_result["stderr"] or "unknown error",
+            }
+        )
+    else:
+        try:
+            data = json.loads(nodes_json_result["stdout"] or "{}")
+            items = data.get("items", [])
+            for item in items:
+                capacity = (
+                    item.get("status", {}).get("capacity")
+                    if isinstance(item, dict)
+                    else {}
+                )
+                cpu_total += parse_cpu_quantity(capacity.get("cpu"))
+                mem_total_gib += parse_memory_to_gib(capacity.get("memory"))
+        except Exception as exc:
+            snapshot["errors"].append(
+                {"collector": "nodes_json", "error": f"parse error: {exc}"}
+            )
 
-    snapshot["summary"] = {"total_pods": total, "bad_pods": bad}
+    # Utilization from kubectl top
+    top_nodes_cmd = "kubectl top nodes"
+    top_nodes_result = run_shell_command(top_nodes_cmd)
+    cpu_used = 0.0
+    mem_used_gib = 0.0
+    if top_nodes_result["exit_code"] != 0:
+        snapshot["errors"].append(
+            {
+                "collector": "top_nodes",
+                "error": top_nodes_result["stderr"] or "unknown error",
+            }
+        )
+    else:
+        lines = top_nodes_result["stdout"].splitlines()
+        for line in lines[1:]:  # skip header
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            cpu_used += parse_cpu_quantity(parts[1])
+            mem_used_gib += parse_memory_to_gib(parts[3])
+
+    cpu_util = (cpu_used / cpu_total * 100) if cpu_total > 0 else 0.0
+    mem_util = (mem_used_gib / mem_total_gib * 100) if mem_total_gib > 0 else 0.0
+
+    snapshot["summary"]["cpu"] = {
+        "total_cores": round(cpu_total, 2),
+        "used_cores": round(cpu_used, 2),
+        "utilization_percent": round(cpu_util, 2),
+    }
+
+    snapshot["summary"]["memory"] = {
+        "total_gib": round(mem_total_gib, 2),
+        "used_gib": round(mem_used_gib, 2),
+        "utilization_percent": round(mem_util, 2),
+    }
+
     return snapshot
 
 
