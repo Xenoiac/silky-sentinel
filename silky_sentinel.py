@@ -519,63 +519,145 @@ Remember: JSON ONLY, strictly following one of the allowed schemas.
     return base_prompt
 
 
-def agent_step(state: AgentState, user_decision: Optional[dict] = None) -> Dict[str, Any]:
-    if state["steps_done"] >= state["max_steps"]:
-        return {"status": "done", "answer": "Reached max steps", "state": state}
+def _trim_message_history(state: AgentState, max_message_history: int = 8) -> None:
+    if len(state["messages"]) > max_message_history + 1:
+        state["messages"] = [state["messages"][0]] + state["messages"][-max_message_history:]
 
-    if user_decision and "message" in user_decision:
-        state["messages"].append({"role": "user", "content": user_decision.get("message", "")})
+
+def _sanitize_model_output(raw_text: str) -> str:
+    return raw_text.replace("```json", "").replace("```", "").strip()
+
+
+def agent_engine_step(
+    state: AgentState, user_decision: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Perform a single reasoning step without any I/O side effects."""
+
+    if state["steps_done"] >= state["max_steps"]:
+        return {"status": "done", "final_answer": "Reached max steps", "state": state}
 
     if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
         return {
             "status": "done",
-            "answer": "Mock agent response.",
+            "final_answer": "Mock agent response.",
             "state": state,
         }
 
+    llm_client = get_llm_client()
+    if llm_client is None:
+        return {
+            "status": "done",
+            "final_answer": "LLM client is not configured.",
+            "state": state,
+        }
+
+    ran: Optional[Dict[str, Any]] = None
+
+    if user_decision:
+        decision_type = user_decision.get("type") or user_decision.get("decision")
+        proposal = user_decision.get("proposal") or {}
+        proposal_action = proposal.get("action") or user_decision.get("action")
+        proposal_command = proposal.get("command") or user_decision.get("command") or ""
+
+        if decision_type == "skip":
+            skip_msg = "User skipped the remaining steps for this session."
+            state["messages"].append({"role": "user", "content": skip_msg})
+            return {"status": "done", "final_answer": skip_msg, "state": state}
+
+        if decision_type == "approve" and proposal_action == "run_command" and proposal_command:
+            result = run_shell_command(proposal_command)
+            summary = _append_command_result_to_messages(state, proposal_command, result)
+            ran = {
+                "type": "command",
+                "command": proposal_command,
+                "result": result,
+                "summary": summary,
+            }
+        elif decision_type == "approve" and proposal_action == "analyze_log":
+            log_path = proposal.get("log_path") or ""
+            digest = analyze_logs_locally(
+                log_path,
+                keywords=proposal.get("keywords"),
+                context_lines=proposal.get("context_lines", 5),
+                max_snippets=proposal.get("max_snippets", 50),
+            )
+            digest_for_model = truncate_for_model(digest, max_chars=8000)
+            state["messages"].append(
+                {"role": "user", "content": f"Local log analysis of {log_path}:\n{digest_for_model}"}
+            )
+            ran = {
+                "type": "analyze_log",
+                "log_path": log_path,
+                "digest": digest,
+            }
+        elif decision_type == "deny" and proposal_action == "run_command" and proposal_command:
+            deny_msg = f"The user denied running the command: {proposal_command}"
+            state["messages"].append({"role": "user", "content": deny_msg})
+        elif decision_type == "deny" and proposal_action == "analyze_log":
+            log_path = proposal.get("log_path") or ""
+            deny_msg = f"The user denied log analysis on: {log_path}"
+            state["messages"].append({"role": "user", "content": deny_msg})
+        elif user_decision.get("message"):
+            state["messages"].append({"role": "user", "content": user_decision.get("message", "")})
+
+    _trim_message_history(state)
+
     try:
-        resp = client.responses.create(
+        response = llm_client.responses.create(
             model=LLM_MODEL,
             input=state["messages"],
         )
     except Exception as exc:  # pragma: no cover - network
-        return {"status": "error", "answer": f"Agent call failed: {exc}"}
+        return {"status": "error", "final_answer": f"Agent call failed: {exc}", "state": state}
 
-    output_text = resp.output_text if hasattr(resp, "output_text") else ""
-    state["messages"].append({"role": "assistant", "content": output_text})
-    state["steps_done"] += 1
+    raw_text = response.output_text.strip() if hasattr(response, "output_text") else ""
+    clean_text = _sanitize_model_output(raw_text)
+    state["messages"].append({"role": "assistant", "content": clean_text})
+    state["steps_done"] = state.get("steps_done", 0) + 1
 
     try:
-        parsed = json.loads(output_text)
+        data = json.loads(clean_text)
     except json.JSONDecodeError:
-        return {"status": "done", "answer": output_text, "state": state}
+        return {"status": "done", "final_answer": clean_text, "ran": ran, "state": state}
 
-    action = parsed.get("action")
+    action = data.get("action")
     if action == "final_answer":
-        return {"status": "done", "answer": parsed.get("content", ""), "state": state}
+        return {
+            "status": "done",
+            "final_answer": data.get("content", ""),
+            "ran": ran,
+            "state": state,
+        }
 
     if action == "run_command":
-        reason = parsed.get("reason", "")
-        command = parsed.get("command", "")
         return {
             "status": "need_approval",
             "action": "run_command",
-            "command": command,
-            "reason": reason,
+            "command": data.get("command", ""),
+            "reason": data.get("reason", ""),
+            "ran": ran,
             "state": state,
         }
 
     if action == "analyze_log":
-        digest = analyze_logs_locally(
-            parsed.get("log_path", ""),
-            keywords=parsed.get("keywords"),
-            context_lines=parsed.get("context_lines", 5),
-            max_snippets=parsed.get("max_snippets", 50),
-        )
-        state["messages"].append({"role": "system", "content": digest})
-        return agent_step(state)
+        return {
+            "status": "need_approval",
+            "action": "analyze_log",
+            "log_path": data.get("log_path", ""),
+            "keywords": data.get("keywords"),
+            "context_lines": data.get("context_lines", 5),
+            "max_snippets": data.get("max_snippets", 50),
+            "reason": data.get("reason", ""),
+            "ran": ran,
+            "state": state,
+        }
 
-    return {"status": "intermediate", "answer": output_text, "state": state}
+    return {
+        "status": "intermediate",
+        "note": clean_text,
+        "ran": ran,
+        "state": state,
+    }
 
 
 def _append_command_result_to_messages(state: AgentState, command: str, result: dict) -> str:
@@ -597,138 +679,8 @@ def _append_command_result_to_messages(state: AgentState, command: str, result: 
     return short_summary
 
 
-def init_web_agent_state(user_question: str) -> AgentState:
-    """
-    Build the system+user messages for a web/HTTP session.
-    Use build_unified_sre_context() and build_sre_system_prompt(context) to create the system message.
-    """
-
-    unified = build_unified_sre_context()
-    system_prompt = build_sre_system_prompt(unified)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_question},
-    ]
-    return {"messages": messages, "steps_done": 0, "max_steps": 12}
-
-
-def web_agent_step(
-    state: AgentState, user_decision: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Perform ONE reasoning step similar to the CLI agent.
-    """
-
-    if state["steps_done"] >= state.get("max_steps", 8):
-        return {"status": "done", "final_answer": "Reached max steps", "state": state}
-
-    llm_client = get_llm_client()
-    if llm_client is None:
-        return {
-            "status": "done",
-            "final_answer": "LLM client is not configured.",
-            "state": state,
-        }
-
-    command_output = None
-
-    if user_decision:
-        decision_type = user_decision.get("type")
-        decision_command = (user_decision.get("command") or "").strip()
-
-        if decision_type == "approve" and decision_command:
-            result = run_shell_command(decision_command)
-            command_output = _append_command_result_to_messages(
-                state, decision_command, result
-            )
-        elif decision_type == "deny" and decision_command:
-            deny_msg = f"User denied running the command: {decision_command}"
-            state["messages"].append({"role": "user", "content": deny_msg})
-            command_output = deny_msg
-        elif decision_type == "skip":
-            skip_msg = "User skipped the remaining steps for this session."
-            state["messages"].append({"role": "user", "content": skip_msg})
-            return {"status": "done", "final_answer": skip_msg, "state": state}
-        elif user_decision.get("message"):
-            state["messages"].append(
-                {"role": "user", "content": user_decision.get("message", "")}
-            )
-
-    response = llm_client.responses.create(
-        model=LLM_MODEL,
-        input=state["messages"],
-    )
-
-    raw_text = response.output_text.strip() if hasattr(response, "output_text") else ""
-    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-    state["messages"].append({"role": "assistant", "content": clean_text})
-    state["steps_done"] = state.get("steps_done", 0) + 1
-
-    try:
-        data = json.loads(clean_text)
-    except json.JSONDecodeError:
-        return {"status": "done", "final_answer": clean_text, "state": state}
-
-    action = data.get("action")
-    if action == "final_answer":
-        return {
-            "status": "done",
-            "final_answer": data.get("content", ""),
-            "command_output": command_output,
-            "state": state,
-        }
-
-    if action == "run_command":
-        return {
-            "status": "need_approval",
-            "proposed_command": data.get("command", ""),
-            "reason": data.get("reason", ""),
-            "command_output": command_output,
-            "state": state,
-        }
-
-    if action == "analyze_log":
-        digest = analyze_logs_locally(
-            data.get("log_path", ""),
-            keywords=data.get("keywords"),
-            context_lines=data.get("context_lines", 5),
-            max_snippets=data.get("max_snippets", 50),
-        )
-        state["messages"].append(
-            {"role": "user", "content": f"Local log analysis:\n{digest}"}
-        )
-        return web_agent_step(state)
-
-    return {
-        "status": "intermediate",
-        "command_output": command_output,
-        "state": state,
-    }
-
-
-def agent_session(initial_query: str, max_steps: int = 8):
-    """
-    Start an interaction session with Silky Sentinel for a single user query.
-    The session may involve several 'run_command' / 'analyze_log' cycles + a final answer.
-    """
-
-    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
-        notify_admin(f"(MOCK) Received query: {initial_query}", "MOCK")
-        print("MOCK MODE: no real reasoning, no commands executed.")
-        return
-
-    if client is None:
-        raise RuntimeError("OpenAI client is not initialized. Check OPENAI_API_KEY in your .env.")
-
-    notify_admin(f"User query: {initial_query}", "QUERY")
-
-    context_data = {
-        "oci_region": OCI_REGION,
-        "oci_compartment_ocid": OCI_COMPARTMENT_OCID,
-        "kubeconfig": KUBECONFIG,
-    }
-
-    system_prompt = f"""
+def build_cli_agent_system_prompt(context_data: Dict[str, Any]) -> str:
+    return f"""
 You are 'Silky Sentinel', a senior DevOps/SRE assistant for Silky Systems.
 
 You are running in a special mode where you can:
@@ -811,151 +763,167 @@ CRITICAL RULES:
 Remember: JSON ONLY, strictly following one of the allowed schemas.
 """
 
-    # Conversation messages for Responses API
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": initial_query},
-    ]
 
-    for step in range(max_steps):
-        # Limit history to avoid context explosion (system + last N messages)
-        max_message_history = 8
-        if len(messages) > max_message_history + 1:
-            messages = [messages[0]] + messages[-max_message_history:]
+def init_web_agent_state(user_question: str) -> AgentState:
+    """
+    Build the system+user messages for a web/HTTP session.
+    Use build_unified_sre_context() and build_sre_system_prompt(context) to create the system message.
+    """
 
-        response = client.responses.create(
-            model=LLM_MODEL,
-            input=messages,
-        )
+    unified = build_unified_sre_context()
+    system_prompt = build_sre_system_prompt(unified)
+    return init_agent_state(system_prompt, user_question, max_steps=12)
 
-        raw_text = response.output_text.strip()
-        # Handle accidental ```json ... ``` wrappers
-        clean_text = raw_text.replace("```json", "").replace("```", "").strip()
 
-        try:
-            data = json.loads(clean_text)
-        except json.JSONDecodeError:
-            notify_admin("Model returned non-JSON response, stopping.", "ERROR")
-            print("RAW MODEL OUTPUT:\n", raw_text)
-            return
+def web_agent_step(
+    state: AgentState, user_decision: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Thin wrapper around the shared agent engine for web usage."""
 
-        action = data.get("action")
+    return agent_engine_step(state, user_decision=user_decision)
 
-        # ------------------ run_command ------------------
-        if action == "run_command":
-            command = data.get("command", "")
-            reason = data.get("reason", "")
 
-            notify_admin(f"Model requested command: {command}", "PLAN")
+def agent_session(initial_query: str, max_steps: int = 8):
+    """
+    Start an interaction session with Silky Sentinel for a single user query.
+    The session may involve several 'run_command' / 'analyze_log' cycles + a final answer.
+    """
 
-            print("\n--- COMMAND PROPOSED BY SILKY SENTINEL ---")
-            if reason:
-                print(f"Reason: {reason}")
-            print(f"Command:\n  {command}")
-            choice = input("Approve and run this command? [y/n/s=skip session] ").strip().lower()
+    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
+        notify_admin(f"(MOCK) Received query: {initial_query}", "MOCK")
+        print("MOCK MODE: no real reasoning, no commands executed.")
+        return
 
-            if choice == "s":
-                print("Skipping remaining steps for this session.")
-                return
+    if client is None:
+        raise RuntimeError("OpenAI client is not initialized. Check OPENAI_API_KEY in your .env.")
 
-            if choice != "y":
-                deny_msg = f"The user denied running the command: {command}"
-                messages.append({"role": "user", "content": deny_msg})
-                continue
+    notify_admin(f"User query: {initial_query}", "QUERY")
 
-            # Run the command
-            result = run_shell_command(command)
+    context_data = {
+        "oci_region": OCI_REGION,
+        "oci_compartment_ocid": OCI_COMPARTMENT_OCID,
+        "kubeconfig": KUBECONFIG,
+    }
+
+    system_prompt = build_cli_agent_system_prompt(context_data)
+    state = init_agent_state(system_prompt, initial_query, max_steps=max_steps)
+    pending_decision: Optional[Dict[str, Any]] = None
+
+    while True:
+        step_result = agent_engine_step(state, user_decision=pending_decision)
+        pending_decision = None
+
+        ran = step_result.get("ran")
+        if ran and ran.get("type") == "command":
+            result = ran.get("result", {})
             notify_admin(
-                f"Command executed with exit_code={result['exit_code']}", "EXEC"
+                f"Command executed with exit_code={result.get('exit_code')}", "EXEC"
             )
-
-            # Show to user
             print("\n--- COMMAND RESULT ---")
-            print(f"Exit code: {result['exit_code']}")
+            print(f"Exit code: {result.get('exit_code')}")
             print("STDOUT:")
-            print(result["stdout"] or "<empty>")
+            print(result.get("stdout") or "<empty>")
             print("\nSTDERR:")
-            print(result["stderr"] or "<empty>")
+            print(result.get("stderr") or "<empty>")
             print("-----------------------------------------\n")
 
-            # Feed result back to the model (trimmed)
-            stdout_trimmed = truncate_for_model(result["stdout"], max_chars=4000)
-            stderr_trimmed = truncate_for_model(result["stderr"], max_chars=2000)
+        if ran and ran.get("type") == "analyze_log":
+            print("\n--- LOCAL LOG ANALYSIS DIGEST ---")
+            print(ran.get("digest", ""))
+            print("-----------------------------------------\n")
 
-            result_text = (
-                f"Result of command: {command}\n"
-                f"EXIT_CODE: {result['exit_code']}\n"
-                f"STDOUT:\n{stdout_trimmed}\n"
-                f"STDERR:\n{stderr_trimmed}\n"
-            )
-            messages.append({"role": "user", "content": result_text})
-            continue
+        status = step_result.get("status")
 
-        # ------------------ analyze_log ------------------
-        elif action == "analyze_log":
-            log_path = data.get("log_path", "")
-            keywords = data.get("keywords") or None
-            context_lines = int(data.get("context_lines", 5))
-            max_snippets = int(data.get("max_snippets", 50))
-            reason = data.get("reason", "")
+        if status == "need_approval":
+            action = step_result.get("action")
+            if action == "run_command":
+                command = step_result.get("command", "")
+                reason = step_result.get("reason", "")
 
-            notify_admin(f"Model requested local log analysis on: {log_path}", "PLAN")
+                notify_admin(f"Model requested command: {command}", "PLAN")
 
-            print("\n--- LOCAL LOG ANALYSIS REQUESTED BY SILKY SENTINEL ---")
-            if reason:
-                print(f"Reason: {reason}")
-            print(f"Log path: {log_path}")
-            print(f"Keywords: {keywords or '[default]'}")
-            print(f"Context lines: {context_lines}, Max snippets: {max_snippets}")
-            choice = input("Run local log analysis now? [y/n/s=skip session] ").strip().lower()
+                print("\n--- COMMAND PROPOSED BY SILKY SENTINEL ---")
+                if reason:
+                    print(f"Reason: {reason}")
+                print(f"Command:\n  {command}")
+                choice = input(
+                    "Approve and run this command? [y/n/s=skip session] "
+                ).strip().lower()
 
-            if choice == "s":
-                print("Skipping remaining steps for this session.")
-                return
+                if choice == "s":
+                    print("Skipping remaining steps for this session.")
+                    return
 
-            if choice != "y":
-                deny_msg = f"The user denied log analysis on: {log_path}"
-                messages.append({"role": "user", "content": deny_msg})
+                if choice != "y":
+                    pending_decision = {
+                        "type": "deny",
+                        "proposal": step_result,
+                    }
+                    continue
+
+                pending_decision = {
+                    "type": "approve",
+                    "proposal": step_result,
+                }
                 continue
 
-            # Run local analysis
-            digest = analyze_logs_locally(
-                log_path=log_path,
-                keywords=keywords,
-                context_lines=context_lines,
-                max_snippets=max_snippets,
-            )
+            if action == "analyze_log":
+                log_path = step_result.get("log_path", "")
+                keywords = step_result.get("keywords") or None
+                context_lines = int(step_result.get("context_lines", 5))
+                max_snippets = int(step_result.get("max_snippets", 50))
+                reason = step_result.get("reason", "")
 
-            # Show digest to user
-            print("\n--- LOCAL LOG ANALYSIS DIGEST ---")
-            print(digest)
-            print("-----------------------------------------\n")
+                notify_admin(f"Model requested local log analysis on: {log_path}", "PLAN")
 
-            # Feed digest back into the model
-            digest_for_model = truncate_for_model(digest, max_chars=8000)
-            messages.append({
-                "role": "user",
-                "content": f"Local log analysis of {log_path}:\n{digest_for_model}"
-            })
-            continue
+                print("\n--- LOCAL LOG ANALYSIS REQUESTED BY SILKY SENTINEL ---")
+                if reason:
+                    print(f"Reason: {reason}")
+                print(f"Log path: {log_path}")
+                print(f"Keywords: {keywords or '[default]'}")
+                print(f"Context lines: {context_lines}, Max snippets: {max_snippets}")
+                choice = input("Run local log analysis now? [y/n/s=skip session] ").strip().lower()
 
-        # ------------------ final_answer ------------------
-        elif action == "final_answer":
-            content = data.get("content", "")
+                if choice == "s":
+                    print("Skipping remaining steps for this session.")
+                    return
+
+                if choice != "y":
+                    pending_decision = {
+                        "type": "deny",
+                        "proposal": step_result,
+                    }
+                    continue
+
+                pending_decision = {
+                    "type": "approve",
+                    "proposal": step_result,
+                    "log_path": log_path,
+                    "keywords": keywords,
+                    "context_lines": context_lines,
+                    "max_snippets": max_snippets,
+                }
+                continue
+
+        if status == "done":
+            final_answer = step_result.get("final_answer", "")
             notify_admin("Model provided final answer.", "PLAN")
             print("\n=== FINAL ANSWER ===\n")
-            print(content)
+            print(final_answer)
             print()
             return
 
-        else:
-            notify_admin(f"Unknown action returned: {action}", "ERROR")
-            print("Unknown action in model response:\n", data)
+        if status == "error":
+            print(step_result.get("final_answer", "Agent error encountered."))
             return
 
-    # If we exit the loop without final_answer
-    notify_admin("Reached max_steps without final_answer.", "WARN")
-    print("Stopped after reaching max_steps without a final answer.")
+        if status == "intermediate":
+            continue
+
+        if state["steps_done"] >= state["max_steps"]:
+            notify_admin("Reached max_steps without final_answer.", "WARN")
+            print("Stopped after reaching max_steps without a final answer.")
+            return
 
 
 # --------------------------------------------------------------------
