@@ -6,12 +6,33 @@ import silky_sentinel
 
 
 def test_night_collect_cluster_health(monkeypatch):
-    fake_output = """default pod-a 1/1 Running 0 10s
+    pods_output = """default pod-a 1/1 Running 0 10s
 default pod-b 0/1 CrashLoopBackOff 6 20s
+"""
+    nodes_output = """node-1 Ready control-plane 10d v1
+node-2 NotReady worker 5d v1
+"""
+    nodes_json = {
+        "items": [
+            {"status": {"capacity": {"cpu": "4", "memory": "8Gi"}}},
+            {"status": {"capacity": {"cpu": "8", "memory": "16Gi"}}},
+        ]
+    }
+    top_nodes_output = """NAME CPU(cores) CPU% MEMORY(bytes) MEMORY%
+node-1 200m 20% 1024Mi 25%
+node-2 1000m 50% 2048Mi 50%
 """
 
     def fake_run_shell_command(cmd):
-        return {"exit_code": 0, "stdout": fake_output, "stderr": ""}
+        if "get pods" in cmd:
+            return {"exit_code": 0, "stdout": pods_output, "stderr": ""}
+        if "get nodes -o json" in cmd:
+            return {"exit_code": 0, "stdout": json.dumps(nodes_json), "stderr": ""}
+        if "get nodes" in cmd:
+            return {"exit_code": 0, "stdout": nodes_output, "stderr": ""}
+        if "top nodes" in cmd:
+            return {"exit_code": 0, "stdout": top_nodes_output, "stderr": ""}
+        return {"exit_code": 1, "stdout": "", "stderr": "unknown"}
 
     monkeypatch.setattr(silky_sentinel, "run_shell_command", fake_run_shell_command)
 
@@ -19,6 +40,13 @@ default pod-b 0/1 CrashLoopBackOff 6 20s
 
     assert snapshot["summary"]["total_pods"] == 2
     assert snapshot["summary"]["bad_pods"] == 1
+    assert snapshot["summary"]["nodes"] == {"count": 2, "ready": 1, "not_ready": 1}
+    assert snapshot["summary"]["cpu"]["total_cores"] == 12.0
+    assert snapshot["summary"]["cpu"]["used_cores"] == 1.2
+    assert snapshot["summary"]["cpu"]["utilization_percent"] == 10.0
+    assert snapshot["summary"]["memory"]["total_gib"] == 24.0
+    assert snapshot["summary"]["memory"]["used_gib"] == 3.0
+    assert snapshot["summary"]["memory"]["utilization_percent"] == 12.5
     assert any(
         p["namespace"] == "default" and p["name"] == "pod-a" and p["status"] == "Running" and p["restarts"] == 0
         for p in snapshot["pods"]

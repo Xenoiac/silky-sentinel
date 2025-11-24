@@ -17,15 +17,53 @@
         <h2>Cluster Overview</h2>
       </div>
 
-      <div class="card-grid">
-        <article class="card" id="card-total-pods">
-          <p class="label">Total Pods</p>
-          <p class="value" id="total-pods">0</p>
+      <div class="gauge-grid">
+        <article class="gauge-card" id="card-cpu">
+          <div class="gauge-header">
+            <p class="label">CPU Utilization</p>
+            <p class="value" id="cpu-percent">0%</p>
+          </div>
+          <div class="gauge-bar" aria-hidden="true">
+            <div class="gauge-fill" id="cpu-fill"></div>
+          </div>
+          <div class="gauge-footer" id="cpu-detail">0 / 0 cores</div>
         </article>
-        <article class="card" id="card-bad-pods">
-          <p class="label">Bad Pods</p>
-          <p class="value" id="bad-pods">0</p>
+
+        <article class="gauge-card" id="card-memory">
+          <div class="gauge-header">
+            <p class="label">Memory Utilization</p>
+            <p class="value" id="memory-percent">0%</p>
+          </div>
+          <div class="gauge-bar" aria-hidden="true">
+            <div class="gauge-fill" id="memory-fill"></div>
+          </div>
+          <div class="gauge-footer" id="memory-detail">0 / 0 GiB</div>
         </article>
+
+        <article class="gauge-card" id="card-pods">
+          <div class="gauge-header">
+            <p class="label">Pods Health (bad)</p>
+            <p class="value" id="pods-percent">0%</p>
+          </div>
+          <div class="gauge-bar" aria-hidden="true">
+            <div class="gauge-fill" id="pods-fill"></div>
+          </div>
+          <div class="gauge-footer" id="pods-detail">0 bad of 0 pods</div>
+        </article>
+
+        <article class="gauge-card" id="card-nodes">
+          <div class="gauge-header">
+            <p class="label">Node Readiness (not-ready)</p>
+            <p class="value" id="nodes-percent">0%</p>
+          </div>
+          <div class="gauge-bar" aria-hidden="true">
+            <div class="gauge-fill" id="nodes-fill"></div>
+          </div>
+          <div class="gauge-footer" id="nodes-detail">0 ready / 0 not-ready</div>
+        </article>
+      </div>
+
+      <div class="card-grid solo">
         <article class="card" id="card-last-severity">
           <p class="label">Last Severity</p>
           <p class="value" id="last-severity">—</p>

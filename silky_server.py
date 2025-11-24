@@ -117,6 +117,17 @@ def cluster_pods():
     return snapshot
 
 
+@app.get("/api/cluster/metrics")
+def cluster_metrics():
+    try:
+        ensure_kubeconfig()
+    except Exception as exc:  # pragma: no cover - runtime validation
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    snapshot = night_collect_cluster_health()
+    return snapshot.get("summary", {})
+
+
 @app.get("/api/night/events")
 def night_events(limit: int = 50):
     events = read_night_events(limit)
