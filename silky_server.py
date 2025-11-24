@@ -29,12 +29,12 @@ from silky_sentinel import (
     truncate_for_model,
     LLM_MODEL,
     apply_sre_suggestion,
-    init_agent_state,
-    agent_step,
-    build_system_prompt_for_agent,
     build_sre_system_prompt,
+    AgentState,
     get_llm_client,
     extract_text_from_responses,
+    init_web_agent_state,
+    web_agent_step,
 )
 from uuid import uuid4
 
@@ -64,7 +64,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 night_thread = None
 night_stop_event = None
 night_start_time = None
-agent_sessions = {}
+agent_sessions: Dict[str, AgentState] = {}
 suggestion_chat_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
@@ -392,9 +392,8 @@ def agent_start(payload: dict):
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
 
-    system_prompt = build_system_prompt_for_agent(context=payload.get("context"))
-    state = init_agent_state(system_prompt, question)
-    result = agent_step(state, user_decision=None)
+    state = init_web_agent_state(question)
+    result = web_agent_step(state, user_decision=None)
     session_id = str(uuid4())
     agent_sessions[session_id] = state
     result["session_id"] = session_id
@@ -412,7 +411,7 @@ def agent_step_api(payload: dict):
     if state is None:
         raise HTTPException(status_code=404, detail="session not found")
 
-    result = agent_step(state, user_decision=decision)
+    result = web_agent_step(state, user_decision=decision)
     agent_sessions[session_id] = state
     result["session_id"] = session_id
     return result

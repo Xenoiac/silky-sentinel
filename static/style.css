@@ -815,6 +815,88 @@ button.secondary:hover {
   margin-bottom: 3px;
 }
 
+.agent-block {
+  background: #0d1526;
+  border: 1px solid #1c2a4a;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.agent-user {
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+
+.agent-command pre {
+  background: #0b1021;
+  border: 1px dashed #23395b;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.agent-actions button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.agent-actions button:hover {
+  background: #334155;
+}
+
+.agent-output {
+  border-left: 3px solid #38bdf8;
+}
+
+.agent-final {
+  border-left: 3px solid #22c55e;
+  font-weight: 600;
+}
+
+.agent-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #eab308;
+}
+
+.agent-running-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #eab308;
+  display: inline-block;
+  animation: agentPulse 1s infinite;
+}
+
+@keyframes agentPulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 @keyframes pulse {
   0% {
     opacity: 0.4;

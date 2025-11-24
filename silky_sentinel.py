@@ -103,6 +103,64 @@ def build_sre_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
     return base
 
 
+def _latest_report_text_or_empty() -> str:
+    if not REPORTS_DIR.exists():
+        return ""
+
+    candidates = [p for p in REPORTS_DIR.glob("**/*") if p.is_file()]
+    if not candidates:
+        return ""
+
+    latest_file = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        return latest_file.read_text(errors="replace")
+    except Exception:
+        return ""
+
+
+def _read_recent_night_events(limit: int = 15) -> List[Dict[str, Any]]:
+    if not NIGHT_LOG_PATH.exists():
+        return []
+
+    entries: List[Dict[str, Any]] = []
+    try:
+        with open(NIGHT_LOG_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        return []
+
+    return list(reversed(entries[-limit:]))
+
+
+def build_unified_sre_context() -> Dict[str, Any]:
+    """
+    Collect a compact context bundle for the SRE brain (cluster + night mode).
+    """
+
+    try:
+        ensure_kubeconfig()
+    except Exception:
+        pass
+
+    snapshot = night_collect_cluster_health()
+    events = _read_recent_night_events(limit=15)
+    latest_report = _latest_report_text_or_empty()
+
+    return {
+        "mode": SILKY_MODE,
+        "cluster_snapshot": snapshot,
+        "recent_events": events,
+        "latest_report": truncate_for_model(latest_report, max_chars=3000),
+    }
+
+
 def ensure_kubeconfig() -> str:
     """Validate kubeconfig path and export it so kubectl always uses it."""
     kubeconfig = os.getenv("KUBECONFIG")
@@ -518,6 +576,134 @@ def agent_step(state: AgentState, user_decision: Optional[dict] = None) -> Dict[
         return agent_step(state)
 
     return {"status": "intermediate", "answer": output_text, "state": state}
+
+
+def _append_command_result_to_messages(state: AgentState, command: str, result: dict) -> str:
+    stdout_trimmed = truncate_for_model(result.get("stdout", ""), max_chars=4000)
+    stderr_trimmed = truncate_for_model(result.get("stderr", ""), max_chars=2000)
+    exit_code = result.get("exit_code", 0)
+
+    result_text = (
+        f"Result of command: {command}\n"
+        f"EXIT_CODE: {exit_code}\n"
+        f"STDOUT:\n{stdout_trimmed}\n"
+        f"STDERR:\n{stderr_trimmed}\n"
+    )
+    state["messages"].append({"role": "user", "content": result_text})
+    short_summary = (
+        f"Command `{command}` exited {exit_code}. "
+        f"STDOUT: {(stdout_trimmed or '<empty>')[:200]}"
+    )
+    return short_summary
+
+
+def init_web_agent_state(user_question: str) -> AgentState:
+    """
+    Build the system+user messages for a web/HTTP session.
+    Use build_unified_sre_context() and build_sre_system_prompt(context) to create the system message.
+    """
+
+    unified = build_unified_sre_context()
+    system_prompt = build_sre_system_prompt(unified)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_question},
+    ]
+    return {"messages": messages, "steps_done": 0, "max_steps": 12}
+
+
+def web_agent_step(
+    state: AgentState, user_decision: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Perform ONE reasoning step similar to the CLI agent.
+    """
+
+    if state["steps_done"] >= state.get("max_steps", 8):
+        return {"status": "done", "final_answer": "Reached max steps", "state": state}
+
+    llm_client = get_llm_client()
+    if llm_client is None:
+        return {
+            "status": "done",
+            "final_answer": "LLM client is not configured.",
+            "state": state,
+        }
+
+    command_output = None
+
+    if user_decision:
+        decision_type = user_decision.get("type")
+        decision_command = (user_decision.get("command") or "").strip()
+
+        if decision_type == "approve" and decision_command:
+            result = run_shell_command(decision_command)
+            command_output = _append_command_result_to_messages(
+                state, decision_command, result
+            )
+        elif decision_type == "deny" and decision_command:
+            deny_msg = f"User denied running the command: {decision_command}"
+            state["messages"].append({"role": "user", "content": deny_msg})
+            command_output = deny_msg
+        elif decision_type == "skip":
+            skip_msg = "User skipped the remaining steps for this session."
+            state["messages"].append({"role": "user", "content": skip_msg})
+            return {"status": "done", "final_answer": skip_msg, "state": state}
+        elif user_decision.get("message"):
+            state["messages"].append(
+                {"role": "user", "content": user_decision.get("message", "")}
+            )
+
+    response = llm_client.responses.create(
+        model=LLM_MODEL,
+        input=state["messages"],
+    )
+
+    raw_text = response.output_text.strip() if hasattr(response, "output_text") else ""
+    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+    state["messages"].append({"role": "assistant", "content": clean_text})
+    state["steps_done"] = state.get("steps_done", 0) + 1
+
+    try:
+        data = json.loads(clean_text)
+    except json.JSONDecodeError:
+        return {"status": "done", "final_answer": clean_text, "state": state}
+
+    action = data.get("action")
+    if action == "final_answer":
+        return {
+            "status": "done",
+            "final_answer": data.get("content", ""),
+            "command_output": command_output,
+            "state": state,
+        }
+
+    if action == "run_command":
+        return {
+            "status": "need_approval",
+            "proposed_command": data.get("command", ""),
+            "reason": data.get("reason", ""),
+            "command_output": command_output,
+            "state": state,
+        }
+
+    if action == "analyze_log":
+        digest = analyze_logs_locally(
+            data.get("log_path", ""),
+            keywords=data.get("keywords"),
+            context_lines=data.get("context_lines", 5),
+            max_snippets=data.get("max_snippets", 50),
+        )
+        state["messages"].append(
+            {"role": "user", "content": f"Local log analysis:\n{digest}"}
+        )
+        return web_agent_step(state)
+
+    return {
+        "status": "intermediate",
+        "command_output": command_output,
+        "state": state,
+    }
 
 
 def agent_session(initial_query: str, max_steps: int = 8):
