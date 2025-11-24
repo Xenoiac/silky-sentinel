@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -178,15 +179,24 @@ def sre_suggestions():
 
 
 @app.post("/api/sre/suggestions/apply")
-def apply_suggestion(payload: dict):
-    suggestion = {
-        "title": payload.get("title", ""),
-        "reason": payload.get("reason", ""),
-        "action": payload.get("action", ""),
-        "command": payload.get("command", ""),
-    }
-    result = apply_sre_suggestion(suggestion)
-    return result
+def api_apply_suggestion(payload: Dict[str, Any]):
+    """
+    Execute an SRE suggestion and summarize its outcome.
+
+    Body JSON:
+      { "title": str, "reason": str, "action": str, "command": str }
+    """
+    try:
+        suggestion = {
+            "title": payload.get("title", ""),
+            "reason": payload.get("reason", ""),
+            "action": payload.get("action", ""),
+            "command": payload.get("command", ""),
+        }
+        result = apply_sre_suggestion(suggestion)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to apply suggestion: {exc}")
 
 
 @app.post("/api/night/start")

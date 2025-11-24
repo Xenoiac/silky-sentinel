@@ -52,6 +52,25 @@ if OPENAI_API_KEY != "DUMMY_KEY_FOR_MOCK_DEMO":
 # --------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------
+def get_llm_client():
+    """Return the configured LLM client, if available."""
+
+    return client
+
+
+def extract_text_from_responses(response: Any) -> str:
+    """Safely extract text content from an OpenAI response object."""
+
+    if response is None:
+        return ""
+    if hasattr(response, "output_text"):
+        return getattr(response, "output_text") or ""
+    try:
+        return str(response)
+    except Exception:
+        return ""
+
+
 def truncate_for_model(text: str, max_chars: int = 4000) -> str:
     """Trim long text so we don't blow the model context window."""
     if text is None:
@@ -191,64 +210,88 @@ def run_shell_command(command: str, timeout: Optional[int] = None, cwd: Optional
         return data
 
 
-def apply_sre_suggestion(suggestion: dict) -> dict:
+def apply_sre_suggestion(suggestion: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Execute a single actionable suggestion and summarize the result.
+    Execute a suggested command and ask the SRE brain to summarize the outcome.
 
-    suggestion includes:
-      - title
-      - reason
-      - action (human sentence)
-      - command (string; a kubectl or diagnostic command)
+    suggestion keys:
+      - title: str
+      - reason: str
+      - action: str
+      - command: str
+
+    Returns:
+      {
+        "status": "ok" | "error",
+        "summary": str,    # very short outcome summary
+        "next_step": str,  # optional follow-up step (may be empty)
+        "exit_code": int,
+      }
     """
+    cmd = (suggestion.get("command") or "").strip()
+    context = {
+        "suggestion_title": suggestion.get("title", ""),
+        "suggestion_reason": suggestion.get("reason", ""),
+        "suggestion_action": suggestion.get("action", ""),
+        "command": cmd,
+    }
+    if not cmd:
+        return {
+            "status": "error",
+            "summary": "No command is defined for this suggestion.",
+            "next_step": "",
+            "exit_code": -1,
+        }
 
-    command = suggestion.get("command", "")
-    result = run_shell_command(command, timeout=60, cwd=None)
+    # 1) Run the command
+    result = run_shell_command(cmd)  # reuse your existing helper
+    stdout_val = getattr(result, "stdout", None)
+    stderr_val = getattr(result, "stderr", None)
+    exit_code_val = getattr(result, "exit_code", None)
 
-    summary_prompt = f"""
-You are summarizing the outcome of an SRE automation action. Provide a concise status update (1-3 sentences) for leadership.
+    if isinstance(result, dict):
+        stdout_val = stdout_val if stdout_val is not None else result.get("stdout")
+        stderr_val = stderr_val if stderr_val is not None else result.get("stderr")
+        exit_code_val = exit_code_val if exit_code_val is not None else result.get("exit_code")
 
-Suggestion title: {suggestion.get('title','')}
-Reason: {suggestion.get('reason','')}
-Proposed action: {suggestion.get('action','')}
-Command executed: {command}
+    stdout = (stdout_val or "")[:4000]
+    stderr = (stderr_val or "")[:4000]
+    exit_code = int(exit_code_val) if exit_code_val is not None else 0
 
-Command exit code: {result.get('exit_code')}
-STDOUT (truncated): {truncate_for_model(result.get('stdout'), max_chars=1200)}
-STDERR (truncated): {truncate_for_model(result.get('stderr'), max_chars=800)}
+    # 2) Ask the SRE brain to summarize
+    system_prompt = build_sre_system_prompt(context)
+    user_prompt = (
+        "You recommended this action for a Kubernetes cluster, and we just ran the command.\n\n"
+        f"Command: {cmd}\n"
+        f"Exit code: {exit_code}\n\n"
+        f"STDOUT (truncated):\n{stdout}\n\n"
+        f"STDERR (truncated):\n{stderr}\n\n"
+        "In 1-3 short sentences, describe:\n"
+        "- what was checked or changed,\n"
+        "- what the results show,\n"
+        "- and whether any further action is needed (mention only one most important next step).\n"
+    )
 
-Respond with a clean, high-level summary noting success/failure and key findings. Avoid raw logs.
-"""
+    llm_client = get_llm_client()
+    summary = ""
 
-    summary_text = ""
-    status = "ok"
-
-    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO" or client is None:
-        status = "error" if result.get("exit_code", 1) != 0 else "ok"
-        summary_text = (
-            "Mock execution; review audit logs for details." if client is None else summary_text
-        )
+    if llm_client is None:
+        summary = "Command executed; LLM summarization unavailable."
     else:
-        try:
-            resp = client.responses.create(
-                model=LLM_MODEL,
-                input=[
-                    {
-                        "role": "user",
-                        "content": summary_prompt,
-                    }
-                ],
-            )
-            summary_text = resp.output_text if hasattr(resp, "output_text") else ""
-        except Exception as exc:  # pragma: no cover - network
-            summary_text = f"Failed to summarize result: {exc}"
-            status = "error"
+        completion = llm_client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        summary = extract_text_from_responses(completion).strip()
 
     return {
-        "status": status,
-        "summary": summary_text,
-        "exit_code": result.get("exit_code"),
-        "command": command,
+        "status": "ok" if exit_code == 0 else "error",
+        "summary": summary,
+        "next_step": "",
+        "exit_code": exit_code,
     }
 
 
