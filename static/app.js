@@ -1,23 +1,61 @@
 const REFRESH_INTERVAL_MS = 30000;
+const SUMMARY_REFRESH_MS = 150000;
+const NIGHT_START_ENDPOINT = "/api/night/start";
+const NIGHT_STOP_ENDPOINT = "/api/night/stop";
 
 const els = {
-  totalPods: document.getElementById("total-pods"),
-  badPods: document.getElementById("bad-pods"),
   lastSeverity: document.getElementById("last-severity"),
+  metricsUpdated: document.getElementById("metrics-updated-at"),
+  overallHealth: document.getElementById("overall-health-pill"),
   podsTableBody: document.getElementById("pods-table-body"),
-  nightStatusText: document.getElementById("night-status-text"),
-  nightStatusIndicator: document.getElementById("night-status-indicator"),
+  podsTableContainer: document.getElementById("pods-table-container"),
+  cpuPercent: document.getElementById("cpu-util"),
+  cpuFill: document.getElementById("cpu-bar-fill"),
+  cpuDetail: document.getElementById("cpu-cores"),
+  memoryPercent: document.getElementById("memory-util"),
+  memoryFill: document.getElementById("memory-bar-fill"),
+  memoryDetail: document.getElementById("memory-usage"),
+  storagePercent: document.getElementById("storage-util"),
+  storageFill: document.getElementById("storage-bar-fill"),
+  storageDetail: document.getElementById("storage-usage"),
+  podsPercent: document.getElementById("pods-percent"),
+  podsFill: document.getElementById("pods-bar-fill"),
+  podsDetail: document.getElementById("pods-detail"),
+  nodesPercent: document.getElementById("nodes-percent"),
+  nodesFill: document.getElementById("nodes-bar-fill"),
+  nodesDetail: document.getElementById("nodes-detail"),
+  alertIncidents: document.getElementById("alert-incidents"),
+  alertQueues: document.getElementById("alert-queues"),
+  nsTopCpu: document.getElementById("ns-top-cpu"),
+  nsTopMemory: document.getElementById("ns-top-memory"),
+  nsUnhealthy: document.getElementById("ns-unhealthy"),
+  podsTotalPill: document.getElementById("pods-total-pill"),
+  errorBanner: document.getElementById("cluster-errors"),
+  errorList: document.getElementById("error-list"),
+  nightStatusPill: document.getElementById("night-status-pill"),
   nightEventsLog: document.getElementById("night-events-log"),
+  nightSummaryBox: document.getElementById("night-summary-box"),
   nightReportSelect: document.getElementById("night-report-select"),
   nightReportViewer: document.getElementById("night-report-viewer"),
   nightReportButton: document.getElementById("btn-view-report"),
-  btnNightStart: document.getElementById("btn-night-start"),
-  btnNightStop: document.getElementById("btn-night-stop"),
+  expandNightEvents: document.getElementById("expand-night-events"),
+  expandReportViewer: document.getElementById("expand-report-viewer"),
+  modalOverlay: document.getElementById("modal-overlay"),
+  modalText: document.getElementById("modal-text"),
+  modalClose: document.getElementById("modal-close-btn"),
+  startNightBtn: document.getElementById("start-night-btn"),
+  stopNightBtn: document.getElementById("stop-night-btn"),
   chatForm: document.getElementById("chat-form"),
   chatMessage: document.getElementById("chat-message"),
   chatSend: document.getElementById("btn-chat-send"),
   chatResponse: document.getElementById("chat-response-text"),
 };
+
+let currentSuggestionSession = null;
+const suggestionSessions = new Map();
+let allPods = [];
+let podsRendered = 0;
+const PAGE_SIZE = 50;
 
 function notify(message, type = "info") {
   const toast = document.createElement("div");
@@ -57,19 +95,162 @@ function severityTone(level = "") {
   return "info";
 }
 
-function setStatusIndicator(running) {
-  const indicator = els.nightStatusIndicator;
-  indicator.classList.remove("running", "stopped", "idle");
-  if (running === true) {
-    indicator.classList.add("running");
-    els.nightStatusText.textContent = "Running";
-  } else if (running === false) {
-    indicator.classList.add("stopped");
-    els.nightStatusText.textContent = "Stopped";
-  } else {
-    indicator.classList.add("idle");
-    els.nightStatusText.textContent = "Unknown";
+function openModal(text) {
+  if (!els.modalOverlay || !els.modalText) return;
+  els.modalText.textContent = text || "";
+  els.modalOverlay.classList.remove("hidden");
+}
+
+function closeModal() {
+  if (!els.modalOverlay) return;
+  els.modalOverlay.classList.add("hidden");
+}
+
+function gaugeTone(percent = 0) {
+  if (percent > 90) return "tone-red";
+  if (percent > 80) return "tone-orange";
+  if (percent > 60) return "tone-yellow";
+  return "tone-green";
+}
+
+function setGauge({ fill, value, text }, percent = 0, detail = "") {
+  const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+  const tone = gaugeTone(safePercent);
+  if (fill) {
+    fill.style.width = `${safePercent}%`;
+    fill.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
+    fill.classList.add(tone);
   }
+  if (value) {
+    value.textContent = `${safePercent.toFixed(1)}%`;
+  }
+  if (text) {
+    text.textContent = detail;
+  }
+}
+
+function updateNightStatus(isRunning) {
+  const pill = els.nightStatusPill;
+  if (!pill) return;
+  if (isRunning) {
+    pill.textContent = "● Running";
+    pill.classList.add("night-status-running");
+    pill.classList.remove("night-status-stopped");
+  } else {
+    pill.textContent = "● Stopped";
+    pill.classList.add("night-status-stopped");
+    pill.classList.remove("night-status-running");
+  }
+}
+
+function updateOverallHealth(unhealthyPercent = 0, severity = "") {
+  if (!els.overallHealth) return;
+  const normalized = severity.toString().toLowerCase();
+  let status = "GOOD";
+  let tone = "pill-good";
+
+  if (normalized === "high" || normalized === "critical") {
+    status = "CRITICAL";
+    tone = "pill-critical";
+  } else if (normalized === "medium" || normalized === "warn" || unhealthyPercent > 20) {
+    status = "WARN";
+    tone = "pill-warn";
+  }
+
+  els.overallHealth.textContent = `Overall Health: ${status}`;
+  els.overallHealth.classList.remove("pill-good", "pill-warn", "pill-critical");
+  els.overallHealth.classList.add(tone);
+}
+
+function renderNamespaceRows(target, rows, emptyText = "No data") {
+  if (!target) return;
+  target.innerHTML = "";
+  const columnCount = target.closest("table")?.querySelectorAll("th").length || 3;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="${columnCount}" class="muted">${emptyText}</td>`;
+    target.appendChild(tr);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = Object.values(row).map((val) => (val ?? "").toString());
+    tr.innerHTML = values.map((val) => `<td>${val}</td>`).join("");
+    target.appendChild(tr);
+  });
+}
+
+function renderNamespaceRowsWithBar(target, rows, valueKey, emptyText = "No data") {
+  if (!target) return;
+  target.innerHTML = "";
+  const columnCount = target.closest("table")?.querySelectorAll("th").length || 3;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="${columnCount}" class="muted">${emptyText}</td>`;
+    target.appendChild(tr);
+    return;
+  }
+
+  const maxValue = Math.max(
+    ...rows.map((row) => {
+      const value = Number(row[valueKey]);
+      return Number.isFinite(value) ? value : 0;
+    }),
+    0,
+  );
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = "namespace-row";
+    const value = Number(row[valueKey]);
+    const fill = maxValue > 0 && Number.isFinite(value) ? value / maxValue : 0;
+    tr.style.setProperty("--fill", fill);
+
+    tr.innerHTML = `
+      <td>
+        <div class="namespace-row-bar"></div>
+        <span class="ns-name">${row.namespace || ""}</span>
+      </td>
+      <td class="ns-metric">${row[valueKey] ?? 0}</td>
+      <td class="ns-pods">${row.pods ?? 0}</td>
+    `;
+    target.appendChild(tr);
+  });
+}
+
+function renderPodRow(pod) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${pod.namespace || ""}</td>
+    <td>${pod.name || ""}</td>
+    <td>${pod.status || ""}</td>
+    <td>${pod.restarts ?? ""}</td>
+    <td>${pod.age || ""}</td>
+    <td>${pod.node || ""}</td>
+  `;
+  return tr;
+}
+
+function renderNextPods() {
+  if (!els.podsTableBody || !Array.isArray(allPods)) return;
+  if (podsRendered >= allPods.length) return;
+
+  const nextBatch = allPods.slice(podsRendered, podsRendered + PAGE_SIZE);
+  nextBatch.forEach((pod) => {
+    els.podsTableBody.appendChild(renderPodRow(pod));
+  });
+  podsRendered += nextBatch.length;
+}
+
+function setupPodsInfiniteScroll() {
+  if (!els.podsTableContainer) return;
+  els.podsTableContainer.addEventListener("scroll", () => {
+    const { scrollTop, clientHeight, scrollHeight } = els.podsTableContainer;
+    if (scrollTop + clientHeight >= scrollHeight - 16) {
+      renderNextPods();
+    }
+  });
 }
 
 async function loadClusterPods() {
@@ -79,28 +260,122 @@ async function loadClusterPods() {
     const data = await resp.json();
     const pods = Array.isArray(data.pods) ? data.pods : [];
     const summary = data.summary || {};
+    const nodes = summary.nodes || {};
+    const cpu = summary.cpu || {};
+    const memory = summary.memory || {};
+    const storage = summary.storage || {};
+    const podsSummary = summary.pods || {};
+    const alerts = summary.alerts || {};
+    const queues = summary.queues || {};
 
-    const total = summary.total_pods ?? pods.length;
-    const bad =
-      summary.bad_pods ??
-      pods.filter(
-        (p) => (p.status !== "Running" && p.status !== "Completed") || Number(p.restarts) > 5,
-      ).length;
+    if (els.metricsUpdated) {
+      els.metricsUpdated.textContent = new Date().toLocaleTimeString();
+    }
 
-    els.totalPods.textContent = total;
-    els.badPods.textContent = bad;
+    setGauge(
+      { fill: els.cpuFill, value: els.cpuPercent, text: els.cpuDetail },
+      Number(cpu.utilization_percent ?? 0),
+      `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`,
+    );
 
-    els.podsTableBody.innerHTML = "";
-    pods.forEach((pod) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${pod.namespace || ""}</td>
-        <td>${pod.name || ""}</td>
-        <td>${pod.status || ""}</td>
-        <td>${pod.restarts ?? ""}</td>
-      `;
-      els.podsTableBody.appendChild(tr);
-    });
+    setGauge(
+      { fill: els.memoryFill, value: els.memoryPercent, text: els.memoryDetail },
+      Number(memory.utilization_percent ?? 0),
+      `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
+    );
+
+    setGauge(
+      { fill: els.storageFill, value: els.storagePercent, text: els.storageDetail },
+      Number(storage.utilization_percent ?? 0),
+      `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`,
+    );
+
+    const total = podsSummary.total ?? pods.length;
+    const bad = podsSummary.unhealthy ?? 0;
+    const badPercent = total > 0 ? (bad / total) * 100 : 0;
+    setGauge(
+      { fill: els.podsFill, value: els.podsPercent, text: els.podsDetail },
+      podsSummary.unhealthy_percent ?? badPercent,
+      `${bad} unhealthy of ${total} pods`,
+    );
+
+    const notReady = nodes.not_ready ?? 0;
+    const ready = nodes.ready ?? 0;
+    const nodeTotal = nodes.count ?? ready + notReady;
+    const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
+    setGauge(
+      { fill: els.nodesFill, value: els.nodesPercent, text: els.nodesDetail },
+      notReadyPercent,
+      `${ready} ready / ${notReady} not-ready`,
+    );
+
+    const severity = alerts.last_severity || "—";
+    if (els.lastSeverity) {
+      els.lastSeverity.textContent = severity === "—" ? "—" : severity.toString().toUpperCase();
+    }
+
+    updateOverallHealth(podsSummary.unhealthy_percent ?? badPercent, severity);
+    if (els.alertIncidents) {
+      const incidents = alerts.open_incidents ?? 0;
+      els.alertIncidents.textContent = `Open incidents: ${incidents}`;
+    }
+    if (els.alertQueues) {
+      const enabled = queues.enabled === true;
+      const totalBacklog = queues.total_backlog ?? 0;
+      els.alertQueues.textContent = enabled
+        ? `Queues backlog: ${totalBacklog}`
+        : "Queues disabled";
+    }
+
+    if (els.podsTotalPill) {
+      els.podsTotalPill.textContent = `${total} pods`;
+    }
+
+    renderNamespaceRowsWithBar(
+      els.nsTopCpu,
+      data.namespaces?.top_by_cpu || [],
+      "cpu_mcores",
+    );
+
+    renderNamespaceRowsWithBar(
+      els.nsTopMemory,
+      data.namespaces?.top_by_memory || [],
+      "memory_mib",
+    );
+
+    renderNamespaceRows(
+      els.nsUnhealthy,
+      (data.namespaces?.unhealthy_counts || []).map((item) => ({
+        Namespace: item.namespace || "",
+        Unhealthy: item.unhealthy_pods ?? 0,
+      })),
+      "All namespaces healthy",
+    );
+
+    allPods = pods;
+    podsRendered = 0;
+    if (els.podsTableBody) {
+      els.podsTableBody.innerHTML = "";
+    }
+    if (els.podsTableContainer) {
+      els.podsTableContainer.scrollTop = 0;
+    }
+    renderNextPods();
+
+    const errorList = Array.isArray(data.errors) ? data.errors : [];
+    if (els.errorBanner && els.errorList) {
+      els.errorList.innerHTML = "";
+      if (errorList.length) {
+        els.errorBanner.hidden = false;
+        errorList.forEach((err) => {
+          const li = document.createElement("li");
+          li.textContent = err;
+          els.errorList.appendChild(li);
+        });
+      } else {
+        els.errorBanner.hidden = true;
+      }
+    }
   } catch (err) {
     console.error(err);
     notify("Failed to load cluster pods", "error");
@@ -112,7 +387,7 @@ async function loadNightStatus() {
     const resp = await fetch("/api/night/status");
     if (!resp.ok) throw new Error(`Failed to load status: ${resp.status}`);
     const data = await resp.json();
-    setStatusIndicator(Boolean(data.running));
+    updateNightStatus(Boolean(data.running));
   } catch (err) {
     console.error(err);
     notify("Failed to load night status", "error");
@@ -180,6 +455,19 @@ async function loadNightEvents() {
   } catch (err) {
     console.error(err);
     notify("Failed to load night events", "error");
+  }
+}
+
+async function loadNightSummary() {
+  if (!els.nightSummaryBox) return;
+  try {
+    const resp = await fetch("/api/night/summary");
+    if (!resp.ok) throw new Error(`Failed to load summary: ${resp.status}`);
+    const data = await resp.json();
+    els.nightSummaryBox.textContent = data.summary_markdown || "(No summary available)";
+  } catch (err) {
+    console.error(err);
+    els.nightSummaryBox.textContent = "Unable to load Night Mode summary.";
   }
 }
 
@@ -253,15 +541,196 @@ async function postNightAction(endpoint) {
     await loadNightStatus();
     if (endpoint.includes("start")) {
       notify("Night Mode started");
-      setStatusIndicator(true);
+      updateNightStatus(true);
     } else if (endpoint.includes("stop")) {
       notify("Night Mode stopped");
-      setStatusIndicator(false);
+      updateNightStatus(false);
     }
     return data;
   } catch (err) {
     console.error(err);
     notify("Night action failed", "error");
+  }
+}
+
+async function loadSreSuggestions() {
+  const listEl = document.getElementById("suggestions-list");
+  if (!listEl) return;
+  listEl.innerText = "Loading suggestions…";
+
+  try {
+    const res = await fetch("/api/sre/suggestions");
+    const data = await res.json();
+    const suggestions = data.suggestions || [];
+    if (suggestions.length === 0) {
+      listEl.innerText = "No active suggestions. Cluster looks calm.";
+      return;
+    }
+
+    listEl.innerHTML = "";
+    suggestions.forEach((s) => {
+      const card = document.createElement("div");
+      card.className = "suggestion-card";
+      card.dataset.suggestionId = s.id;
+
+      card.innerHTML = `
+        <div class="suggestion-title">${s.title}</div>
+        <div class="suggestion-meta">
+          <span class="suggestion-risk suggestion-risk-${s.risk || "low"}">
+            Risk: ${(s.risk || "low").toUpperCase()}
+          </span>
+          <span class="suggestion-category">${s.category || ""}</span>
+        </div>
+        <p class="suggestion-reason">${s.reason}</p>
+        <p class="suggestion-action"><strong>Action:</strong> ${s.action}</p>
+        <pre class="suggestion-command">${s.command}</pre>
+        <div class="suggestion-result"></div>
+        <div class="suggestion-actions">
+          <button class="apply-btn">Apply</button>
+          <button class="discuss-btn">Discuss</button>
+          <button class="dismiss-btn">Dismiss</button>
+        </div>
+      `;
+      listEl.appendChild(card);
+    });
+  } catch (err) {
+    listEl.innerText = "Failed to load suggestions.";
+    console.error(err);
+  }
+}
+
+async function handleApplySuggestion(card, payload, resultEl) {
+  card.classList.add("running");
+  if (resultEl) {
+    resultEl.innerHTML = '<span class="suggestion-running-indicator">Running recommended action…</span>';
+  }
+  try {
+    const res = await fetch("/api/sre/suggestions/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    card.classList.remove("running");
+    if (resultEl) {
+      const icon = data.status === "ok" ? "✅" : "⚠️";
+      const summary = data.summary || "No summary available.";
+      resultEl.innerHTML = `<p><strong>${icon} Result:</strong> ${summary}</p>`;
+    }
+  } catch (err) {
+    card.classList.remove("running");
+    if (resultEl) {
+      resultEl.innerHTML = `<p><strong>⚠️ Result:</strong> Failed to run action.</p>`;
+    }
+    console.error("Apply suggestion failed", err);
+  }
+}
+
+function handleAgentResponseFromSuggestion(data) {
+  if (typeof handleAgentResponse === "function") {
+    handleAgentResponse(data);
+    return;
+  }
+
+  currentSuggestionSession = data?.session_id || null;
+  if (els.chatResponse) {
+    els.chatResponse.textContent =
+      data?.answer || "Agent flow started from suggestion.";
+  }
+}
+
+async function openSuggestionDiscussion(card, payload) {
+  let discussion = card.querySelector(".suggestion-discussion");
+  if (!discussion) {
+    discussion = document.createElement("div");
+    discussion.className = "suggestion-discussion";
+    discussion.innerHTML = `
+      <div class="suggestion-discussion-log"></div>
+      <div class="suggestion-discussion-input">
+        <textarea placeholder="Ask about this suggestion…"></textarea>
+        <button class="suggestion-send-btn">Send</button>
+      </div>
+    `;
+    card.appendChild(discussion);
+  }
+
+  const logEl = discussion.querySelector(".suggestion-discussion-log");
+  const textarea = discussion.querySelector("textarea");
+  const sendBtn = discussion.querySelector(".suggestion-send-btn");
+
+  if (!suggestionSessions.has(card)) {
+    try {
+      const res = await fetch("/api/sre/suggestions/chat/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      suggestionSessions.set(card, data.session_id);
+      appendSuggestionMessage(
+        logEl,
+        "assistant",
+        data.assistant || "Let’s discuss this suggestion.",
+      );
+    } catch (err) {
+      appendSuggestionMessage(
+        logEl,
+        "assistant",
+        "I couldn't start a discussion session for this suggestion.",
+      );
+      console.error("start suggestion chat failed", err);
+    }
+  }
+
+  if (textarea) textarea.focus();
+  if (sendBtn && textarea) {
+    sendBtn.onclick = () => sendSuggestionMessage(card);
+    textarea.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        sendSuggestionMessage(card);
+      }
+    });
+  }
+}
+
+function appendSuggestionMessage(logEl, role, text) {
+  if (!logEl) return;
+  const div = document.createElement("div");
+  div.className = role === "user" ? "msg-user" : "msg-assistant";
+  div.textContent = text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function sendSuggestionMessage(card) {
+  const sessionId = suggestionSessions.get(card);
+  if (!sessionId) return;
+  const discussion = card.querySelector(".suggestion-discussion");
+  if (!discussion) return;
+  const logEl = discussion.querySelector(".suggestion-discussion-log");
+  const textarea = discussion.querySelector("textarea");
+  if (!logEl || !textarea) return;
+  const text = textarea.value.trim();
+  if (!text) return;
+  textarea.value = "";
+  appendSuggestionMessage(logEl, "user", text);
+
+  try {
+    const res = await fetch("/api/sre/suggestions/chat/step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message: text }),
+    });
+    const data = await res.json();
+    appendSuggestionMessage(logEl, "assistant", data.assistant || "[No answer]");
+  } catch (err) {
+    appendSuggestionMessage(
+      logEl,
+      "assistant",
+      "Error while replying about this suggestion.",
+    );
+    console.error("suggestion chat step failed", err);
   }
 }
 
@@ -292,16 +761,14 @@ async function sendChatMessage() {
 }
 
 function setupNightButtons() {
-  if (els.btnNightStart) {
-    els.btnNightStart.addEventListener("click", () => {
-      const endpoint = els.btnNightStart.dataset.endpoint;
-      postNightAction(endpoint);
+  if (els.startNightBtn) {
+    els.startNightBtn.addEventListener("click", () => {
+      postNightAction(NIGHT_START_ENDPOINT);
     });
   }
-  if (els.btnNightStop) {
-    els.btnNightStop.addEventListener("click", () => {
-      const endpoint = els.btnNightStop.dataset.endpoint;
-      postNightAction(endpoint);
+  if (els.stopNightBtn) {
+    els.stopNightBtn.addEventListener("click", () => {
+      postNightAction(NIGHT_STOP_ENDPOINT);
     });
   }
 }
@@ -315,6 +782,34 @@ function setupNightReports() {
   }
 }
 
+function setupModal() {
+  if (els.modalClose) {
+    els.modalClose.addEventListener("click", () => closeModal());
+  }
+
+  if (els.modalOverlay) {
+    els.modalOverlay.addEventListener("click", (ev) => {
+      if (ev.target === els.modalOverlay) {
+        closeModal();
+      }
+    });
+  }
+}
+
+function setupExpanders() {
+  if (els.expandNightEvents) {
+    els.expandNightEvents.addEventListener("click", () => {
+      openModal(els.nightEventsLog?.innerText || "");
+    });
+  }
+
+  if (els.expandReportViewer) {
+    els.expandReportViewer.addEventListener("click", () => {
+      openModal(els.nightReportViewer?.innerText || "");
+    });
+  }
+}
+
 function setupChat() {
   if (els.chatSend) {
     els.chatSend.addEventListener("click", (ev) => {
@@ -324,19 +819,70 @@ function setupChat() {
   }
 }
 
+function setupSuggestions() {
+  const refreshBtn = document.getElementById("refresh-suggestions");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      loadSreSuggestions();
+    });
+  }
+
+  document.getElementById("suggestions-list")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const card = e.target.closest(".suggestion-card");
+    if (!card) return;
+
+    const title = card.querySelector(".suggestion-title")?.innerText || "";
+    const reason = card.querySelector(".suggestion-reason")?.innerText || "";
+    const actionText = card
+      .querySelector(".suggestion-action")
+      ?.innerText.replace(/^Action:\s*/i, "")
+      || "";
+    const cmd = card.querySelector(".suggestion-command")?.innerText || "";
+    const resultEl = card.querySelector(".suggestion-result");
+
+    const payload = { title, reason, action: actionText, command: cmd };
+
+    if (btn.classList.contains("dismiss-btn")) {
+      card.remove();
+      return;
+    }
+
+    if (btn.classList.contains("apply-btn")) {
+      await handleApplySuggestion(card, payload, resultEl);
+      return;
+    }
+
+    if (btn.classList.contains("discuss-btn")) {
+      await openSuggestionDiscussion(card, payload);
+      return;
+    }
+  });
+
+  loadSreSuggestions();
+}
+
 function startPolling() {
   setInterval(loadClusterPods, REFRESH_INTERVAL_MS);
   setInterval(loadNightStatus, REFRESH_INTERVAL_MS);
   setInterval(loadNightEvents, REFRESH_INTERVAL_MS);
+  setInterval(loadNightSummary, SUMMARY_REFRESH_MS);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  setupPodsInfiniteScroll();
   loadClusterPods();
   loadNightStatus();
   loadNightEvents();
   loadNightReports();
+  loadNightSummary();
   setupNightButtons();
   setupNightReports();
+  setupModal();
+  setupExpanders();
   setupChat();
+  setupSuggestions();
   startPolling();
 });

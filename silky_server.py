@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,11 +22,21 @@ from silky_sentinel import (
     NIGHT_INTERVAL_SECONDS,
     client,
     ensure_kubeconfig,
+    generate_sre_suggestions,
     night_collect_cluster_health,
     night_mode_loop,
+    summarize_night_mode,
     truncate_for_model,
     LLM_MODEL,
+    apply_sre_suggestion,
+    init_agent_state,
+    agent_step,
+    build_system_prompt_for_agent,
+    build_sre_system_prompt,
+    get_llm_client,
+    extract_text_from_responses,
 )
+from uuid import uuid4
 
 # ---------------------------------------------------------------------------
 # FastAPI app setup
@@ -53,6 +64,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 night_thread = None
 night_stop_event = None
 night_start_time = None
+agent_sessions = {}
+suggestion_chat_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +103,21 @@ def safe_report_path(filename: str) -> Path:
     return resolved
 
 
+def latest_report_text_or_empty() -> str:
+    if not REPORTS_DIR.exists():
+        return ""
+
+    candidates = [p for p in REPORTS_DIR.glob("**/*") if p.is_file()]
+    if not candidates:
+        return ""
+
+    latest_file = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        return latest_file.read_text(errors="replace")
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -117,10 +145,131 @@ def cluster_pods():
     return snapshot
 
 
+@app.get("/api/cluster/metrics")
+def cluster_metrics():
+    try:
+        ensure_kubeconfig()
+    except Exception as exc:  # pragma: no cover - runtime validation
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    snapshot = night_collect_cluster_health()
+    return snapshot.get("summary", {})
+
+
 @app.get("/api/night/events")
 def night_events(limit: int = 50):
     events = read_night_events(limit)
     return events
+
+
+@app.get("/api/night/summary")
+def night_summary():
+    events = read_night_events(limit=120)
+    latest = latest_report_text_or_empty()
+    return summarize_night_mode(events, latest)
+
+
+@app.get("/api/sre/suggestions")
+def sre_suggestions():
+    try:
+        ensure_kubeconfig()
+    except Exception as exc:  # pragma: no cover - runtime validation
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    snapshot = night_collect_cluster_health()
+    events = read_night_events(limit=120)
+    latest = latest_report_text_or_empty()
+    return generate_sre_suggestions(snapshot, events, latest)
+
+
+@app.post("/api/sre/suggestions/apply")
+def api_apply_suggestion(payload: Dict[str, Any]):
+    """
+    Execute an SRE suggestion and summarize its outcome.
+
+    Body JSON:
+      { "title": str, "reason": str, "action": str, "command": str }
+    """
+    try:
+        suggestion = {
+            "title": payload.get("title", ""),
+            "reason": payload.get("reason", ""),
+            "action": payload.get("action", ""),
+            "command": payload.get("command", ""),
+        }
+        result = apply_sre_suggestion(suggestion)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to apply suggestion: {exc}")
+
+
+@app.post("/api/sre/suggestions/chat/start")
+def api_suggestion_chat_start(payload: Dict[str, Any]):
+    """
+    Start a mini chat session for a specific SRE suggestion.
+
+    Body:
+      { "title": str, "reason": str, "action": str, "command": str }
+    """
+    context = {
+        "suggestion_title": payload.get("title", ""),
+        "suggestion_reason": payload.get("reason", ""),
+        "suggestion_action": payload.get("action", ""),
+        "command": payload.get("command", ""),
+    }
+    system_prompt = build_sre_system_prompt(context)
+    user_prompt = (
+        "We are starting a discussion about this SRE suggestion for a Kubernetes cluster. "
+        "In 1-2 short sentences, summarize what this suggestion is about and invite questions."
+    )
+
+    client = get_llm_client()
+    completion = client.responses.create(
+        model=LLM_MODEL,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    assistant_text = extract_text_from_responses(completion).strip()
+
+    session_id = str(uuid4())
+    suggestion_chat_sessions[session_id] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "assistant", "content": assistant_text},
+    ]
+
+    return {"session_id": session_id, "assistant": assistant_text}
+
+
+@app.post("/api/sre/suggestions/chat/step")
+def api_suggestion_chat_step(payload: Dict[str, Any]):
+    """
+    Continue a mini chat session.
+
+    Body:
+      { "session_id": str, "message": str }
+    """
+    session_id = payload.get("session_id")
+    message = (payload.get("message") or "").strip()
+    if not session_id or session_id not in suggestion_chat_sessions:
+        raise HTTPException(status_code=404, detail="Suggestion chat session not found")
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    msgs = suggestion_chat_sessions[session_id]
+    msgs.append({"role": "user", "content": message})
+
+    client = get_llm_client()
+    completion = client.responses.create(
+        model=LLM_MODEL,
+        input=msgs,
+    )
+    assistant_text = extract_text_from_responses(completion).strip()
+    msgs.append({"role": "assistant", "content": assistant_text})
+    suggestion_chat_sessions[session_id] = msgs
+
+    return {"assistant": assistant_text}
 
 
 @app.post("/api/night/start")
@@ -235,6 +384,38 @@ def chat(payload: dict):
     raw_answer = response.output_text.strip()
     cleaned = raw_answer.replace("```json", "").replace("```", "").strip()
     return {"answer": cleaned}
+
+
+@app.post("/api/agent/start")
+def agent_start(payload: dict):
+    question = (payload or {}).get("question", "")
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    system_prompt = build_system_prompt_for_agent(context=payload.get("context"))
+    state = init_agent_state(system_prompt, question)
+    result = agent_step(state, user_decision=None)
+    session_id = str(uuid4())
+    agent_sessions[session_id] = state
+    result["session_id"] = session_id
+    return result
+
+
+@app.post("/api/agent/step")
+def agent_step_api(payload: dict):
+    session_id = (payload or {}).get("session_id")
+    decision = (payload or {}).get("decision")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    state = agent_sessions.get(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    result = agent_step(state, user_decision=decision)
+    agent_sessions[session_id] = state
+    result["session_id"] = session_id
+    return result
 
 
 # Run with: uvicorn silky_server:app --reload
