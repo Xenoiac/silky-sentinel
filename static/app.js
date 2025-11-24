@@ -2,22 +2,23 @@ const REFRESH_INTERVAL_MS = 30000;
 
 const els = {
   lastSeverity: document.getElementById("last-severity"),
-  lastRefresh: document.getElementById("last-refresh"),
+  metricsUpdated: document.getElementById("metrics-updated-at"),
+  overallHealth: document.getElementById("overall-health-pill"),
   podsTableBody: document.getElementById("pods-table-body"),
-  cpuPercent: document.getElementById("cpu-percent"),
-  cpuFill: document.getElementById("cpu-fill"),
-  cpuDetail: document.getElementById("cpu-detail"),
-  memoryPercent: document.getElementById("memory-percent"),
-  memoryFill: document.getElementById("memory-fill"),
-  memoryDetail: document.getElementById("memory-detail"),
-  storagePercent: document.getElementById("storage-percent"),
-  storageFill: document.getElementById("storage-fill"),
-  storageDetail: document.getElementById("storage-detail"),
+  cpuPercent: document.getElementById("cpu-util"),
+  cpuFill: document.getElementById("cpu-bar-fill"),
+  cpuDetail: document.getElementById("cpu-cores"),
+  memoryPercent: document.getElementById("memory-util"),
+  memoryFill: document.getElementById("memory-bar-fill"),
+  memoryDetail: document.getElementById("memory-usage"),
+  storagePercent: document.getElementById("storage-util"),
+  storageFill: document.getElementById("storage-bar-fill"),
+  storageDetail: document.getElementById("storage-usage"),
   podsPercent: document.getElementById("pods-percent"),
-  podsFill: document.getElementById("pods-fill"),
+  podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
   nodesPercent: document.getElementById("nodes-percent"),
-  nodesFill: document.getElementById("nodes-fill"),
+  nodesFill: document.getElementById("nodes-bar-fill"),
   nodesDetail: document.getElementById("nodes-detail"),
   alertIncidents: document.getElementById("alert-incidents"),
   alertQueues: document.getElementById("alert-queues"),
@@ -117,6 +118,25 @@ function setStatusIndicator(running) {
   }
 }
 
+function updateOverallHealth(unhealthyPercent = 0, severity = "") {
+  if (!els.overallHealth) return;
+  const normalized = severity.toString().toLowerCase();
+  let status = "GOOD";
+  let tone = "pill-good";
+
+  if (normalized === "high" || normalized === "critical") {
+    status = "CRITICAL";
+    tone = "pill-critical";
+  } else if (normalized === "medium" || normalized === "warn" || unhealthyPercent > 20) {
+    status = "WARN";
+    tone = "pill-warn";
+  }
+
+  els.overallHealth.textContent = `Overall Health: ${status}`;
+  els.overallHealth.classList.remove("pill-good", "pill-warn", "pill-critical");
+  els.overallHealth.classList.add(tone);
+}
+
 function renderNamespaceRows(target, rows, emptyText = "No data") {
   if (!target) return;
   target.innerHTML = "";
@@ -136,6 +156,44 @@ function renderNamespaceRows(target, rows, emptyText = "No data") {
   });
 }
 
+function renderNamespaceRowsWithBar(target, rows, valueKey, emptyText = "No data") {
+  if (!target) return;
+  target.innerHTML = "";
+  const columnCount = target.closest("table")?.querySelectorAll("th").length || 3;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="${columnCount}" class="muted">${emptyText}</td>`;
+    target.appendChild(tr);
+    return;
+  }
+
+  const maxValue = Math.max(
+    ...rows.map((row) => {
+      const value = Number(row[valueKey]);
+      return Number.isFinite(value) ? value : 0;
+    }),
+    0,
+  );
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = "namespace-row";
+    const value = Number(row[valueKey]);
+    const fill = maxValue > 0 && Number.isFinite(value) ? value / maxValue : 0;
+    tr.style.setProperty("--fill", fill);
+
+    tr.innerHTML = `
+      <td>
+        <div class="namespace-row-bar"></div>
+        <span class="ns-name">${row.namespace || ""}</span>
+      </td>
+      <td class="ns-metric">${row[valueKey] ?? 0}</td>
+      <td class="ns-pods">${row.pods ?? 0}</td>
+    `;
+    target.appendChild(tr);
+  });
+}
+
 async function loadClusterPods() {
   try {
     const resp = await fetch("/api/cluster/pods");
@@ -151,8 +209,8 @@ async function loadClusterPods() {
     const alerts = summary.alerts || {};
     const queues = summary.queues || {};
 
-    if (els.lastRefresh) {
-      els.lastRefresh.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    if (els.metricsUpdated) {
+      els.metricsUpdated.textContent = new Date().toLocaleTimeString();
     }
 
     setGauge(
@@ -192,10 +250,12 @@ async function loadClusterPods() {
       `${ready} ready / ${notReady} not-ready`,
     );
 
+    const severity = alerts.last_severity || "—";
     if (els.lastSeverity) {
-      const severity = alerts.last_severity || "—";
       els.lastSeverity.textContent = severity === "—" ? "—" : severity.toString().toUpperCase();
     }
+
+    updateOverallHealth(podsSummary.unhealthy_percent ?? badPercent, severity);
     if (els.alertIncidents) {
       const incidents = alerts.open_incidents ?? 0;
       els.alertIncidents.textContent = `Open incidents: ${incidents}`;
@@ -212,22 +272,16 @@ async function loadClusterPods() {
       els.podsTotalPill.textContent = `${total} pods`;
     }
 
-    renderNamespaceRows(
+    renderNamespaceRowsWithBar(
       els.nsTopCpu,
-      (data.namespaces?.top_by_cpu || []).map((item) => ({
-        Namespace: item.namespace || "",
-        "CPU (m)": item.cpu_mcores ?? 0,
-        Pods: item.pods ?? 0,
-      })),
+      data.namespaces?.top_by_cpu || [],
+      "cpu_mcores",
     );
 
-    renderNamespaceRows(
+    renderNamespaceRowsWithBar(
       els.nsTopMemory,
-      (data.namespaces?.top_by_memory || []).map((item) => ({
-        Namespace: item.namespace || "",
-        "Memory (Mi)": item.memory_mib ?? 0,
-        Pods: item.pods ?? 0,
-      })),
+      data.namespaces?.top_by_memory || [],
+      "memory_mib",
     );
 
     renderNamespaceRows(

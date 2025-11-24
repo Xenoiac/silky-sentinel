@@ -13,78 +13,104 @@
 
   <main class="layout">
     <section class="panel" id="cluster-overview">
-      <div class="panel-header">
-        <div>
+      <header class="panel-header cluster-header">
+        <div class="cluster-header-left">
           <p class="eyebrow">SRE Dashboard</p>
           <h2>Cluster Overview</h2>
-          <p class="subtle">Grafana-inspired layout with richer telemetry.</p>
+          <p class="panel-subtitle">Grafana-inspired snapshot of cluster health and capacity.</p>
         </div>
-        <div class="pill" id="last-refresh">Awaiting data…</div>
-      </div>
+        <div class="cluster-header-right">
+          <span class="pill pill-muted">
+            Last update:
+            <span id="metrics-updated-at">--:--</span>
+          </span>
+          <span class="pill pill-health pill-good" id="overall-health-pill">
+            Overall Health: GOOD
+          </span>
+        </div>
+      </header>
 
-      <div class="stat-grid">
-        <article class="stat-card" id="card-cpu">
-          <div class="stat-top">
-            <p class="label">CPU Utilization</p>
-            <p class="value" id="cpu-percent">0%</p>
+      <div class="kpi-grid">
+        <article class="card kpi-card kpi-card-primary" id="card-cpu">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">⚙️</span>
+            <div class="kpi-title">
+              <p class="label">CPU Utilization</p>
+            </div>
           </div>
-          <div class="gauge-bar" aria-hidden="true">
-            <div class="gauge-fill" id="cpu-fill"></div>
+          <p class="value" id="cpu-util">0%</p>
+          <p class="subvalue" id="cpu-cores">0 / 0 cores</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="cpu-bar-fill"></div>
           </div>
-          <p class="muted" id="cpu-detail">0 / 0 cores</p>
         </article>
 
-        <article class="stat-card" id="card-memory">
-          <div class="stat-top">
-            <p class="label">Memory Utilization</p>
-            <p class="value" id="memory-percent">0%</p>
+        <article class="card kpi-card kpi-card-primary" id="card-memory">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">🧠</span>
+            <div class="kpi-title">
+              <p class="label">Memory Utilization</p>
+            </div>
           </div>
-          <div class="gauge-bar" aria-hidden="true">
-            <div class="gauge-fill" id="memory-fill"></div>
+          <p class="value" id="memory-util">0%</p>
+          <p class="subvalue" id="memory-usage">0 / 0 GiB</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="memory-bar-fill"></div>
           </div>
-          <p class="muted" id="memory-detail">0 / 0 GiB</p>
         </article>
 
-        <article class="stat-card" id="card-storage">
-          <div class="stat-top">
-            <p class="label">Storage Utilization</p>
-            <p class="value" id="storage-percent">0%</p>
+        <article class="card kpi-card kpi-card-primary" id="card-storage">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">💽</span>
+            <div class="kpi-title">
+              <p class="label">Storage Utilization</p>
+            </div>
           </div>
-          <div class="gauge-bar" aria-hidden="true">
-            <div class="gauge-fill" id="storage-fill"></div>
+          <p class="value" id="storage-util">0%</p>
+          <p class="subvalue" id="storage-usage">0 / 0 GiB</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="storage-bar-fill"></div>
           </div>
-          <p class="muted" id="storage-detail">0 / 0 GiB</p>
         </article>
 
-        <article class="stat-card" id="card-pods">
-          <div class="stat-top">
-            <p class="label">Unhealthy Pods</p>
-            <p class="value" id="pods-percent">0%</p>
+        <article class="card kpi-card" id="card-pods">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">🚨</span>
+            <div class="kpi-title">
+              <p class="label">Unhealthy Pods</p>
+            </div>
           </div>
-          <div class="gauge-bar" aria-hidden="true">
-            <div class="gauge-fill" id="pods-fill"></div>
+          <p class="value" id="pods-percent">0%</p>
+          <p class="subvalue" id="pods-detail">0 unhealthy of 0 pods</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="pods-bar-fill"></div>
           </div>
-          <p class="muted" id="pods-detail">0 unhealthy of 0 pods</p>
         </article>
 
-        <article class="stat-card" id="card-nodes">
-          <div class="stat-top">
-            <p class="label">Node Readiness</p>
-            <p class="value" id="nodes-percent">0%</p>
+        <article class="card kpi-card" id="card-nodes">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">🖥️</span>
+            <div class="kpi-title">
+              <p class="label">Node Readiness</p>
+            </div>
           </div>
-          <div class="gauge-bar" aria-hidden="true">
-            <div class="gauge-fill" id="nodes-fill"></div>
+          <p class="value" id="nodes-percent">0%</p>
+          <p class="subvalue" id="nodes-detail">0 ready / 0 not-ready</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="nodes-bar-fill"></div>
           </div>
-          <p class="muted" id="nodes-detail">0 ready / 0 not-ready</p>
         </article>
 
-        <article class="stat-card" id="card-alerts">
-          <div class="stat-top">
-            <p class="label">Alerting</p>
-            <p class="value" id="last-severity">—</p>
+        <article class="card kpi-card" id="card-alerts">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">📣</span>
+            <div class="kpi-title">
+              <p class="label">Alerting</p>
+            </div>
           </div>
-          <p class="muted" id="alert-incidents">Open incidents: 0</p>
-          <p class="muted" id="alert-queues">Queues disabled</p>
+          <p class="value" id="last-severity">—</p>
+          <p class="subvalue" id="alert-incidents">Open incidents: 0</p>
+          <p class="subvalue" id="alert-queues">Queues disabled</p>
         </article>
       </div>
 
