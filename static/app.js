@@ -5,6 +5,7 @@ const els = {
   metricsUpdated: document.getElementById("metrics-updated-at"),
   overallHealth: document.getElementById("overall-health-pill"),
   podsTableBody: document.getElementById("pods-table-body"),
+  podsTableContainer: document.getElementById("pods-table-container"),
   cpuPercent: document.getElementById("cpu-util"),
   cpuFill: document.getElementById("cpu-bar-fill"),
   cpuDetail: document.getElementById("cpu-cores"),
@@ -41,6 +42,10 @@ const els = {
   chatSend: document.getElementById("btn-chat-send"),
   chatResponse: document.getElementById("chat-response-text"),
 };
+
+let allPods = [];
+let podsRendered = 0;
+const PAGE_SIZE = 50;
 
 function notify(message, type = "info") {
   const toast = document.createElement("div");
@@ -194,6 +199,40 @@ function renderNamespaceRowsWithBar(target, rows, valueKey, emptyText = "No data
   });
 }
 
+function renderPodRow(pod) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${pod.namespace || ""}</td>
+    <td>${pod.name || ""}</td>
+    <td>${pod.status || ""}</td>
+    <td>${pod.restarts ?? ""}</td>
+    <td>${pod.age || ""}</td>
+    <td>${pod.node || ""}</td>
+  `;
+  return tr;
+}
+
+function renderNextPods() {
+  if (!els.podsTableBody || !Array.isArray(allPods)) return;
+  if (podsRendered >= allPods.length) return;
+
+  const nextBatch = allPods.slice(podsRendered, podsRendered + PAGE_SIZE);
+  nextBatch.forEach((pod) => {
+    els.podsTableBody.appendChild(renderPodRow(pod));
+  });
+  podsRendered += nextBatch.length;
+}
+
+function setupPodsInfiniteScroll() {
+  if (!els.podsTableContainer) return;
+  els.podsTableContainer.addEventListener("scroll", () => {
+    const { scrollTop, clientHeight, scrollHeight } = els.podsTableContainer;
+    if (scrollTop + clientHeight >= scrollHeight - 16) {
+      renderNextPods();
+    }
+  });
+}
+
 async function loadClusterPods() {
   try {
     const resp = await fetch("/api/cluster/pods");
@@ -293,19 +332,15 @@ async function loadClusterPods() {
       "All namespaces healthy",
     );
 
-    els.podsTableBody.innerHTML = "";
-    pods.forEach((pod) => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${pod.namespace || ""}</td>
-        <td>${pod.name || ""}</td>
-        <td>${pod.status || ""}</td>
-        <td>${pod.restarts ?? ""}</td>
-        <td>${pod.age || ""}</td>
-        <td>${pod.node || ""}</td>
-      `;
-      els.podsTableBody.appendChild(tr);
-    });
+    allPods = pods;
+    podsRendered = 0;
+    if (els.podsTableBody) {
+      els.podsTableBody.innerHTML = "";
+    }
+    if (els.podsTableContainer) {
+      els.podsTableContainer.scrollTop = 0;
+    }
+    renderNextPods();
 
     const errorList = Array.isArray(data.errors) ? data.errors : [];
     if (els.errorBanner && els.errorList) {
@@ -551,6 +586,7 @@ function startPolling() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  setupPodsInfiniteScroll();
   loadClusterPods();
   loadNightStatus();
   loadNightEvents();
