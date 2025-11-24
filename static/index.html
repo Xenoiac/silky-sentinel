@@ -260,18 +260,21 @@
           </div>
         </section>
 
+        <div id="chat-timeline" class="chat-timeline" aria-live="polite"></div>
+
         <form class="chat-form" id="chat-form" data-endpoint="/api/chat">
           <label for="chat-message">Message</label>
-          <textarea id="chat-message" name="message" rows="4" placeholder="Ask Silky Sentinel..."></textarea>
+          <textarea
+            id="chat-message"
+            name="message"
+            rows="4"
+            placeholder="Ask Silky Sentinel..."
+            aria-label="Chat message"
+          ></textarea>
           <div class="chat-actions">
-            <button type="button" id="btn-chat-send">Send</button>
+            <button type="button" id="chat-send-btn">Send</button>
           </div>
         </form>
-
-        <div class="chat-response">
-          <h3>Assistant Response</h3>
-          <div class="response-box" id="chat-response-text"></div>
-        </div>
       </section>
     </div>
   </main>
