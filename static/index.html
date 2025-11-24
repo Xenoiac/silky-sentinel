@@ -11,7 +11,7 @@
     <div class="navbar-brand">Silky Sentinel Dashboard</div>
   </header>
 
-  <main class="layout">
+  <main>
     <section class="panel" id="cluster-overview">
       <header class="panel-header cluster-header">
         <div class="cluster-header-left">
@@ -114,134 +114,147 @@
         </article>
       </div>
 
-      <div class="panel-subgrid">
-        <article class="mini-panel">
-          <header class="mini-panel-header">
-            <h3>Namespaces by CPU</h3>
-            <span class="pill subtle-pill">Top 5</span>
-          </header>
-          <table class="compact-table">
-            <thead>
-              <tr><th>Namespace</th><th>CPU (m)</th><th>Pods</th></tr>
-            </thead>
-            <tbody id="ns-top-cpu"></tbody>
-          </table>
-        </article>
-
-        <article class="mini-panel">
-          <header class="mini-panel-header">
-            <h3>Namespaces by Memory</h3>
-            <span class="pill subtle-pill">Top 5</span>
-          </header>
-          <table class="compact-table">
-            <thead>
-              <tr><th>Namespace</th><th>Memory (Mi)</th><th>Pods</th></tr>
-            </thead>
-            <tbody id="ns-top-memory"></tbody>
-          </table>
-        </article>
-
-        <article class="mini-panel">
-          <header class="mini-panel-header">
-            <h3>Unhealthy Pods by Namespace</h3>
-            <span class="pill subtle-pill">Live</span>
-          </header>
-          <table class="compact-table">
-            <thead>
-              <tr><th>Namespace</th><th>Unhealthy</th></tr>
-            </thead>
-            <tbody id="ns-unhealthy"></tbody>
-          </table>
-        </article>
-      </div>
-
-      <div class="table-container">
-        <header class="table-header">
-          <div>
-            <p class="label">Cluster Explorer</p>
-            <h3>Pods inventory</h3>
-          </div>
-          <div class="pill soft" id="pods-total-pill">0 pods</div>
-        </header>
-        <table class="pods-table">
-          <thead>
-            <tr>
-              <th>Namespace</th>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Restarts</th>
-              <th>Age</th>
-              <th>Node</th>
-            </tr>
-          </thead>
-          <tbody id="pods-table-body">
-            <!-- Populated by /static/app.js -->
-          </tbody>
-        </table>
-      </div>
-
       <div class="error-banner" id="cluster-errors" hidden>
         <strong>Collectors:</strong>
         <ul id="error-list"></ul>
       </div>
     </section>
 
-    <section class="panel" id="night-mode">
-      <div class="panel-header">
-        <h2>Night Mode</h2>
-      </div>
+    <div class="layout">
+      <section class="panel" id="cluster-explorer">
+        <header class="panel-header">
+          <div>
+            <h2>Cluster Explorer</h2>
+            <p class="panel-subtitle">
+              Namespaces and pods breakdown for deep inspection.
+            </p>
+          </div>
+        </header>
 
-      <div class="night-status">
-        <span class="status-indicator stopped" aria-hidden="true" id="night-status-indicator"></span>
-        <div class="status-text">
-          <p class="label">Status</p>
-          <p class="value" id="night-status-text">Stopped</p>
+        <div class="panel-subgrid">
+          <article class="mini-panel">
+            <header class="mini-panel-header">
+              <h3>Namespaces by CPU</h3>
+              <span class="pill subtle-pill">Top 5</span>
+            </header>
+            <table class="compact-table">
+              <thead>
+                <tr><th>Namespace</th><th>CPU (m)</th><th>Pods</th></tr>
+              </thead>
+              <tbody id="ns-top-cpu"></tbody>
+            </table>
+          </article>
+
+          <article class="mini-panel">
+            <header class="mini-panel-header">
+              <h3>Namespaces by Memory</h3>
+              <span class="pill subtle-pill">Top 5</span>
+            </header>
+            <table class="compact-table">
+              <thead>
+                <tr><th>Namespace</th><th>Memory (Mi)</th><th>Pods</th></tr>
+              </thead>
+              <tbody id="ns-top-memory"></tbody>
+            </table>
+          </article>
+
+          <article class="mini-panel">
+            <header class="mini-panel-header">
+              <h3>Unhealthy Pods by Namespace</h3>
+              <span class="pill subtle-pill">Live</span>
+            </header>
+            <table class="compact-table">
+              <thead>
+                <tr><th>Namespace</th><th>Unhealthy</th></tr>
+              </thead>
+              <tbody id="ns-unhealthy"></tbody>
+            </table>
+          </article>
         </div>
-      </div>
 
-      <div class="night-actions">
-        <button type="button" id="btn-night-start" data-endpoint="/api/night/start">Start Night Shift</button>
-        <button type="button" class="secondary" id="btn-night-stop" data-endpoint="/api/night/stop">Stop Night Shift</button>
-      </div>
-
-      <div class="night-events">
-        <h3>Latest Night Mode Events</h3>
-        <div class="events-log" id="night-events-log" aria-live="polite">
-          <!-- Night mode events will render here -->
+        <div class="table-container">
+          <header class="table-header">
+            <div>
+              <p class="label">Cluster Explorer</p>
+              <h3>Pods inventory</h3>
+            </div>
+            <div class="pill soft" id="pods-total-pill">0 pods</div>
+          </header>
+          <table class="pods-table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Restarts</th>
+                <th>Age</th>
+                <th>Node</th>
+              </tr>
+            </thead>
+            <tbody id="pods-table-body">
+              <!-- Populated by /static/app.js -->
+            </tbody>
+          </table>
         </div>
-      </div>
+      </section>
 
-      <div class="night-reports">
-        <h3>Night Mode Reports</h3>
-        <div class="report-controls">
-          <label for="night-report-select" class="sr-only">Available reports</label>
-          <select id="night-report-select">
-            <option value="">Select a report…</option>
-          </select>
-          <button type="button" id="btn-view-report">View Report</button>
+      <section class="panel" id="night-mode">
+        <div class="panel-header">
+          <h2>Night Mode</h2>
         </div>
-        <pre class="report-viewer" id="night-report-viewer" aria-live="polite">Choose a report to view its details.</pre>
-      </div>
-    </section>
 
-    <section class="panel" id="chat-console">
-      <div class="panel-header">
-        <h2>Chat Console</h2>
-      </div>
-
-      <form class="chat-form" id="chat-form" data-endpoint="/api/chat">
-        <label for="chat-message">Message</label>
-        <textarea id="chat-message" name="message" rows="4" placeholder="Ask Silky Sentinel..."></textarea>
-        <div class="chat-actions">
-          <button type="button" id="btn-chat-send">Send</button>
+        <div class="night-status">
+          <span class="status-indicator stopped" aria-hidden="true" id="night-status-indicator"></span>
+          <div class="status-text">
+            <p class="label">Status</p>
+            <p class="value" id="night-status-text">Stopped</p>
+          </div>
         </div>
-      </form>
 
-      <div class="chat-response">
-        <h3>Assistant Response</h3>
-        <div class="response-box" id="chat-response-text"></div>
-      </div>
-    </section>
+        <div class="night-actions">
+          <button type="button" id="btn-night-start" data-endpoint="/api/night/start">Start Night Shift</button>
+          <button type="button" class="secondary" id="btn-night-stop" data-endpoint="/api/night/stop">Stop Night Shift</button>
+        </div>
+
+        <div class="night-events">
+          <h3>Latest Night Mode Events</h3>
+          <div class="events-log" id="night-events-log" aria-live="polite">
+            <!-- Night mode events will render here -->
+          </div>
+        </div>
+
+        <div class="night-reports">
+          <h3>Night Mode Reports</h3>
+          <div class="report-controls">
+            <label for="night-report-select" class="sr-only">Available reports</label>
+            <select id="night-report-select">
+              <option value="">Select a report…</option>
+            </select>
+            <button type="button" id="btn-view-report">View Report</button>
+          </div>
+          <pre class="report-viewer" id="night-report-viewer" aria-live="polite">Choose a report to view its details.</pre>
+        </div>
+      </section>
+
+      <section class="panel" id="chat-console">
+        <div class="panel-header">
+          <h2>Chat Console</h2>
+        </div>
+
+        <form class="chat-form" id="chat-form" data-endpoint="/api/chat">
+          <label for="chat-message">Message</label>
+          <textarea id="chat-message" name="message" rows="4" placeholder="Ask Silky Sentinel..."></textarea>
+          <div class="chat-actions">
+            <button type="button" id="btn-chat-send">Send</button>
+          </div>
+        </form>
+
+        <div class="chat-response">
+          <h3>Assistant Response</h3>
+          <div class="response-box" id="chat-response-text"></div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>
