@@ -1,5 +1,7 @@
 const REFRESH_INTERVAL_MS = 30000;
 const SUMMARY_REFRESH_MS = 150000;
+const NIGHT_START_ENDPOINT = "/api/night/start";
+const NIGHT_STOP_ENDPOINT = "/api/night/stop";
 
 const els = {
   lastSeverity: document.getElementById("last-severity"),
@@ -30,8 +32,7 @@ const els = {
   podsTotalPill: document.getElementById("pods-total-pill"),
   errorBanner: document.getElementById("cluster-errors"),
   errorList: document.getElementById("error-list"),
-  nightStatusText: document.getElementById("night-status-text"),
-  nightStatusIndicator: document.getElementById("night-status-indicator"),
+  nightStatusPill: document.getElementById("night-status-pill"),
   nightEventsLog: document.getElementById("night-events-log"),
   nightSummaryBox: document.getElementById("night-summary-box"),
   nightReportSelect: document.getElementById("night-report-select"),
@@ -42,8 +43,8 @@ const els = {
   modalOverlay: document.getElementById("modal-overlay"),
   modalText: document.getElementById("modal-text"),
   modalClose: document.getElementById("modal-close-btn"),
-  btnNightStart: document.getElementById("btn-night-start"),
-  btnNightStop: document.getElementById("btn-night-stop"),
+  startNightBtn: document.getElementById("start-night-btn"),
+  stopNightBtn: document.getElementById("stop-night-btn"),
   chatForm: document.getElementById("chat-form"),
   chatMessage: document.getElementById("chat-message"),
   chatSend: document.getElementById("btn-chat-send"),
@@ -128,18 +129,17 @@ function setGauge({ fill, value, text }, percent = 0, detail = "") {
   }
 }
 
-function setStatusIndicator(running) {
-  const indicator = els.nightStatusIndicator;
-  indicator.classList.remove("running", "stopped", "idle");
-  if (running === true) {
-    indicator.classList.add("running");
-    els.nightStatusText.textContent = "Running";
-  } else if (running === false) {
-    indicator.classList.add("stopped");
-    els.nightStatusText.textContent = "Stopped";
+function updateNightStatus(isRunning) {
+  const pill = els.nightStatusPill;
+  if (!pill) return;
+  if (isRunning) {
+    pill.textContent = "● Running";
+    pill.classList.add("night-status-running");
+    pill.classList.remove("night-status-stopped");
   } else {
-    indicator.classList.add("idle");
-    els.nightStatusText.textContent = "Unknown";
+    pill.textContent = "● Stopped";
+    pill.classList.add("night-status-stopped");
+    pill.classList.remove("night-status-running");
   }
 }
 
@@ -387,7 +387,7 @@ async function loadNightStatus() {
     const resp = await fetch("/api/night/status");
     if (!resp.ok) throw new Error(`Failed to load status: ${resp.status}`);
     const data = await resp.json();
-    setStatusIndicator(Boolean(data.running));
+    updateNightStatus(Boolean(data.running));
   } catch (err) {
     console.error(err);
     notify("Failed to load night status", "error");
@@ -541,10 +541,10 @@ async function postNightAction(endpoint) {
     await loadNightStatus();
     if (endpoint.includes("start")) {
       notify("Night Mode started");
-      setStatusIndicator(true);
+      updateNightStatus(true);
     } else if (endpoint.includes("stop")) {
       notify("Night Mode stopped");
-      setStatusIndicator(false);
+      updateNightStatus(false);
     }
     return data;
   } catch (err) {
@@ -761,16 +761,14 @@ async function sendChatMessage() {
 }
 
 function setupNightButtons() {
-  if (els.btnNightStart) {
-    els.btnNightStart.addEventListener("click", () => {
-      const endpoint = els.btnNightStart.dataset.endpoint;
-      postNightAction(endpoint);
+  if (els.startNightBtn) {
+    els.startNightBtn.addEventListener("click", () => {
+      postNightAction(NIGHT_START_ENDPOINT);
     });
   }
-  if (els.btnNightStop) {
-    els.btnNightStop.addEventListener("click", () => {
-      const endpoint = els.btnNightStop.dataset.endpoint;
-      postNightAction(endpoint);
+  if (els.stopNightBtn) {
+    els.stopNightBtn.addEventListener("click", () => {
+      postNightAction(NIGHT_STOP_ENDPOINT);
     });
   }
 }
