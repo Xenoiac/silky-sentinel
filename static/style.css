@@ -52,13 +52,13 @@ a {
 /* Layout */
 .layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 18px;
   padding: 24px 28px 32px;
 }
 
 .panel {
-  background: var(--panel);
+  background: linear-gradient(145deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.9));
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: var(--shadow);
@@ -73,59 +73,59 @@ a {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+  gap: 12px;
 }
 
 .panel-header h2 {
-  margin: 0;
+  margin: 4px 0 0;
   font-size: 1.15rem;
   letter-spacing: 0.2px;
 }
 
-/* Cards */
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.card-grid.solo {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
-  transition: transform 150ms ease, box-shadow 150ms ease;
-}
-
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.2);
-}
-
-.card .label {
-  margin: 0;
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
   color: var(--muted);
+  margin: 0;
+}
+
+.subtle {
+  margin: 4px 0 0;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+}
+
+.pill {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight: 600;
   font-size: 0.9rem;
+  white-space: nowrap;
 }
 
-.card .value {
-  margin: 6px 0 0;
-  font-size: 1.65rem;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+.pill.soft {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
-.gauge-grid {
+.subtle-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+
+.stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
-.gauge-card {
+.stat-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -136,10 +136,48 @@ a {
   gap: 8px;
 }
 
-.gauge-header {
+.stat-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.stat-card .label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.stat-card .value {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.panel-subgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.mini-panel {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.mini-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
 .gauge-bar {
@@ -189,10 +227,23 @@ a {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 6px;
+}
+
 .pods-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 480px;
+}
+
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
 }
 
 .pods-table th,
@@ -202,11 +253,24 @@ a {
   font-size: 0.95rem;
 }
 
+.compact-table th,
+.compact-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  color: #e2e8f0;
+}
+
 .pods-table thead {
   background: rgba(56, 189, 248, 0.08);
   color: var(--text);
   position: sticky;
   top: 0;
+}
+
+.compact-table thead {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
 }
 
 .pods-table tbody tr {
@@ -215,6 +279,23 @@ a {
 }
 
 .pods-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.error-banner {
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fecaca;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+.error-banner ul {
+  margin: 8px 0 0 16px;
+  padding: 0;
+}
+
+.compact-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
