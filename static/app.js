@@ -57,6 +57,7 @@ let allPods = [];
 let podsRendered = 0;
 const PAGE_SIZE = 50;
 let currentAgentSessionId = null;
+let lastAgentCard = null;
 
 function notify(message, type = "info") {
   const toast = document.createElement("div");
@@ -761,64 +762,6 @@ function appendUserMessage(text) {
   scrollTimeline();
 }
 
-function appendDecision(decisionText) {
-  if (!els.chatTimeline) return;
-  const card = document.createElement("div");
-  card.className = "chat-entry user-entry";
-  card.innerHTML = `
-    <p class="entry-label">Decision</p>
-    <span class="decision-chip">You: ${decisionText}</span>
-  `;
-  els.chatTimeline.appendChild(card);
-  scrollTimeline();
-}
-
-function appendProposal(data) {
-  if (!els.chatTimeline) return;
-  const card = document.createElement("div");
-  card.className = "chat-entry proposal-entry";
-  card.innerHTML = `
-    <p class="entry-label">SRE Proposal</p>
-    <p class="entry-title">${data.reason || "Proposed command"}</p>
-    <pre class="command-text">${data.command || data.proposed_command || ""}</pre>
-  `;
-
-  const actions = document.createElement("div");
-  actions.className = "proposal-actions";
-  [
-    { label: "Approve", action: "approve" },
-    { label: "Deny", action: "deny" },
-    { label: "Skip", action: "skip" },
-  ].forEach((btnDef) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = btnDef.label;
-    btn.dataset.agentAction = btnDef.action;
-    btn.dataset.command = data.command || data.proposed_command || "";
-    actions.appendChild(btn);
-  });
-
-  card.appendChild(actions);
-  els.chatTimeline.appendChild(card);
-  scrollTimeline();
-}
-
-function appendCommandResult(summaryText, highlights = []) {
-  if (!els.chatTimeline) return;
-  const card = document.createElement("div");
-  card.className = "chat-entry command-entry";
-  const highlightHtml = Array.isArray(highlights)
-    ? highlights.map((line) => `<li>${line}</li>`).join("")
-    : "";
-  card.innerHTML = `
-    <p class="entry-label">Command Result</p>
-    <p class="command-summary">${summaryText || "Command executed."}</p>
-    ${highlightHtml ? `<ul class="command-highlights">${highlightHtml}</ul>` : ""}
-  `;
-  els.chatTimeline.appendChild(card);
-  scrollTimeline();
-}
-
 function appendFinalAnswer(answerText) {
   if (!els.chatTimeline) return;
   const card = document.createElement("div");
@@ -831,34 +774,192 @@ function appendFinalAnswer(answerText) {
   scrollTimeline();
 }
 
+function setAgentStatus(card, label, toneClass = "") {
+  const status = card?.querySelector?.(".agent-status");
+  if (!status) return;
+  status.textContent = label;
+  status.className = "agent-status";
+  if (toneClass) {
+    status.classList.add(toneClass);
+  }
+}
+
+function setAgentButtonsDisabled(card, disabled) {
+  const buttons = card?.querySelectorAll?.("button[data-agent-action]");
+  if (!buttons) return;
+  buttons.forEach((btn) => {
+    btn.disabled = disabled;
+  });
+}
+
+function setAgentOutput(card, summaryText, highlights = [], exitCode = null) {
+  const output = card?.querySelector?.(".agent-output");
+  if (!output) return;
+  const highlightHtml = Array.isArray(highlights)
+    ? highlights.map((line) => `<li>${line}</li>`).join("")
+    : "";
+
+  const completionChip = document.createElement("span");
+  completionChip.className = "agent-chip subtle-pill";
+  completionChip.textContent = exitCode == null
+    ? "Command completed"
+    : `Command completed (exit code ${exitCode})`;
+
+  output.innerHTML = `
+    <p class="command-summary">${summaryText || "Command executed."}</p>
+    ${highlightHtml ? `<ul class="command-highlights">${highlightHtml}</ul>` : ""}
+  `;
+  output.prepend(completionChip);
+  setAgentStatus(card, "Completed", "status-done");
+  setAgentButtonsDisabled(card, true);
+}
+
+function setAgentRunning(card, label = "Running…") {
+  const output = card?.querySelector?.(".agent-output");
+  if (output) {
+    output.innerHTML = `
+      <div class="agent-running">
+        <span class="dot-pulse"></span>
+        <span>${label}</span>
+      </div>
+    `;
+  }
+  setAgentStatus(card, "Running", "status-running");
+  setAgentButtonsDisabled(card, true);
+}
+
+function appendOutcomeToCard(card, answerText) {
+  if (!card) return;
+  const outcome = document.createElement("div");
+  outcome.className = "agent-outcome";
+  outcome.innerHTML = `
+    <p class="entry-label">Outcome</p>
+    <p class="final-answer-text">${answerText || ""}</p>
+  `;
+  card.appendChild(outcome);
+  scrollTimeline();
+}
+
+function createAgentStepCard(data, options = {}) {
+  if (!els.chatTimeline) return null;
+  const { showActions = true, statusLabel = "Awaiting approval", statusTone = "status-awaiting" } = options;
+  const commandText = data.command || data.proposed_command || data?.ran?.command || "";
+
+  const card = document.createElement("div");
+  card.className = "chat-entry agent-step-card";
+  card.dataset.command = commandText;
+
+  const header = document.createElement("div");
+  header.className = "agent-card-header";
+  header.innerHTML = `
+    <p class="entry-label">${data.header || "SRE Step"}</p>
+    <span class="agent-status ${statusTone}">${statusLabel}</span>
+  `;
+
+  const title = document.createElement("p");
+  title.className = "entry-title";
+  title.textContent = data.reason || data.note || "Proposed command";
+
+  const commandBlock = document.createElement("pre");
+  commandBlock.className = "command-text";
+  commandBlock.textContent = commandText || data.note || "";
+
+  const output = document.createElement("div");
+  output.className = "agent-output muted";
+  output.textContent = showActions ? "Awaiting your decision" : "Preparing…";
+
+  const actions = document.createElement("div");
+  actions.className = `proposal-actions ${showActions ? "" : "hidden"}`.trim();
+
+  [
+    { label: "Approve", action: "approve" },
+    { label: "Deny", action: "deny" },
+    { label: "Skip", action: "skip" },
+  ].forEach((btnDef) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = btnDef.label;
+    btn.dataset.agentAction = btnDef.action;
+    btn.dataset.command = commandText;
+    actions.appendChild(btn);
+  });
+
+  card.appendChild(header);
+  card.appendChild(title);
+  card.appendChild(commandBlock);
+  card.appendChild(output);
+  card.appendChild(actions);
+
+  els.chatTimeline.appendChild(card);
+  scrollTimeline();
+
+  return card;
+}
+
 function renderAgentStep(data, { reset = false } = {}) {
   if (!els.chatTimeline || !data) return;
   if (reset) {
     resetTimeline();
+    lastAgentCard = null;
   }
 
+  const commandText = data.command || data.proposed_command || data?.ran?.command || "";
   const hasCommandOutput = Boolean(data.command_output);
+  const isProposal =
+    data.status === "need_approval" || (data.status === "intermediate" && data.proposed_command);
+
+  if (isProposal) {
+    lastAgentCard = createAgentStepCard(data, {
+      showActions: true,
+      statusLabel: "Awaiting approval",
+      statusTone: "status-awaiting",
+    });
+    return;
+  }
+
+  if (data.status === "intermediate" && !data.proposed_command) {
+    lastAgentCard = createAgentStepCard(
+      { ...data, command: commandText, reason: data.note || data.reason || "Update" },
+      { showActions: false, statusLabel: "In progress", statusTone: "status-running" },
+    );
+    return;
+  }
+
+  if (data.status === "running_command") {
+    if (!lastAgentCard) {
+      lastAgentCard = createAgentStepCard(data, {
+        showActions: false,
+        statusLabel: "Running",
+        statusTone: "status-running",
+      });
+    }
+    setAgentRunning(lastAgentCard);
+  }
 
   if (hasCommandOutput) {
-    appendCommandResult(data.command_output, data.highlights || []);
-  }
-
-  if (data.status === "need_approval") {
-    appendProposal(data);
-    return;
-  }
-
-  if (data.status === "running_command" && !hasCommandOutput) {
-    appendCommandResult("Executing command…");
-  }
-
-  if (data.status === "intermediate" && data.proposed_command) {
-    appendProposal(data);
-    return;
+    if (!lastAgentCard) {
+      lastAgentCard = createAgentStepCard(data, {
+        showActions: false,
+        statusLabel: "Running",
+        statusTone: "status-running",
+      });
+    }
+    setAgentOutput(lastAgentCard, data.command_output, data.highlights || [], data.ran?.exit_code);
   }
 
   if (data.status === "done") {
-    appendFinalAnswer(data.final_answer || data.answer || "");
+    const finalText = data.final_answer || data.answer || "";
+    if (finalText) {
+      if (lastAgentCard && (commandText || hasCommandOutput || data.ran)) {
+        appendOutcomeToCard(lastAgentCard, finalText);
+      } else {
+        appendFinalAnswer(finalText);
+      }
+    }
+    if (lastAgentCard) {
+      setAgentStatus(lastAgentCard, "Completed", "status-done");
+      setAgentButtonsDisabled(lastAgentCard, true);
+    }
     currentAgentSessionId = null;
   }
 }
@@ -883,9 +984,28 @@ async function pollNextAgentStep() {
   }
 }
 
-async function handleAgentDecision(decisionType, commandText) {
+async function handleAgentDecision(decisionType, commandText, card) {
   if (!currentAgentSessionId) return;
-  appendDecision(decisionType.charAt(0).toUpperCase() + decisionType.slice(1));
+
+  const targetCard = card || lastAgentCard;
+  if (targetCard) {
+    lastAgentCard = targetCard;
+    if (decisionType === "approve") {
+      setAgentRunning(targetCard, "Running…");
+    } else {
+      setAgentButtonsDisabled(targetCard, true);
+      setAgentStatus(targetCard, "Processing", "status-running");
+      const output = targetCard.querySelector(".agent-output");
+      if (output) {
+        output.innerHTML = `
+          <div class="agent-running">
+            <span class="dot-pulse"></span>
+            <span>Processing…</span>
+          </div>
+        `;
+      }
+    }
+  }
 
   const res = await fetch("/api/agent/step", {
     method: "POST",
@@ -915,6 +1035,7 @@ async function startAgentFromChat() {
 
   currentAgentSessionId = null;
   resetTimeline();
+  lastAgentCard = null;
   appendUserMessage(message);
 
   try {
@@ -1007,8 +1128,9 @@ function setupChat() {
       const btn = ev.target.closest("button[data-agent-action]");
       if (!btn) return;
       const action = btn.dataset.agentAction;
-      const command = btn.dataset.command || "";
-      await handleAgentDecision(action, command);
+      const card = btn.closest(".agent-step-card");
+      const command = btn.dataset.command || card?.dataset.command || "";
+      await handleAgentDecision(action, command, card);
     });
   }
 }
