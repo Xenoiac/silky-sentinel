@@ -1006,10 +1006,17 @@ button.secondary:hover {
 }
 
 .suggestion-discussion-log {
-  max-height: 140px;
+  max-height: 160px;
   overflow-y: auto;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   margin-bottom: 6px;
+  padding: 6px;
+  background: #0f182b;
+  border: 1px solid #1f2d4d;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .suggestion-discussion-input {
@@ -1030,14 +1037,51 @@ button.secondary:hover {
   font-size: 0.8rem;
 }
 
+.msg-user,
+.msg-assistant {
+  padding: 6px 8px;
+  border-radius: 8px;
+  line-height: 1.4;
+}
+
 .msg-user {
   color: #e5e7eb;
-  margin-bottom: 3px;
+  background: #1d2a45;
 }
 
 .msg-assistant {
-  color: #9ca3af;
-  margin-bottom: 3px;
+  color: #c7d2fe;
+  background: #111827;
+  border: 1px solid #1f2d4d;
+}
+
+.msg-label {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 6px;
+}
+
+.discussion-trigger-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.card-discuss-btn {
+  background: #0ea5e9;
+  color: #0b1220;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.card-discuss-btn:hover {
+  background: #38bdf8;
 }
 
 .agent-block {
