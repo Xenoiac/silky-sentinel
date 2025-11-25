@@ -10,20 +10,25 @@ const els = {
   podsTableBody: document.getElementById("pods-table-body"),
   podsTableContainer: document.getElementById("pods-table-container"),
   cpuPercent: document.getElementById("cpu-util"),
-  cpuFill: document.getElementById("cpu-bar-fill"),
   cpuDetail: document.getElementById("cpu-cores"),
+  cpuArc: document.getElementById("cpu-arc"),
+  cpuNeedle: document.getElementById("cpu-needle"),
+  cpuSpark: document.getElementById("cpu-sparkline"),
   memoryPercent: document.getElementById("memory-util"),
-  memoryFill: document.getElementById("memory-bar-fill"),
   memoryDetail: document.getElementById("memory-usage"),
+  memoryArc: document.getElementById("memory-arc"),
+  memoryNeedle: document.getElementById("memory-needle"),
+  memorySpark: document.getElementById("memory-sparkline"),
   storagePercent: document.getElementById("storage-util"),
-  storageFill: document.getElementById("storage-bar-fill"),
   storageDetail: document.getElementById("storage-usage"),
-  podsPercent: document.getElementById("pods-percent"),
-  podsFill: document.getElementById("pods-bar-fill"),
-  podsDetail: document.getElementById("pods-detail"),
-  nodesPercent: document.getElementById("nodes-percent"),
-  nodesFill: document.getElementById("nodes-bar-fill"),
-  nodesDetail: document.getElementById("nodes-detail"),
+  storageArc: document.getElementById("storage-arc"),
+  storageNeedle: document.getElementById("storage-needle"),
+  storageSpark: document.getElementById("storage-sparkline"),
+  networkPercent: document.getElementById("network-util"),
+  networkDetail: document.getElementById("network-usage"),
+  networkArc: document.getElementById("network-arc"),
+  networkNeedle: document.getElementById("network-needle"),
+  networkSpark: document.getElementById("network-sparkline"),
   alertIncidents: document.getElementById("alert-incidents"),
   alertQueues: document.getElementById("alert-queues"),
   nsTopCpu: document.getElementById("ns-top-cpu"),
@@ -58,6 +63,15 @@ let podsRendered = 0;
 const PAGE_SIZE = 50;
 let currentAgentSessionId = null;
 let lastAgentCard = null;
+const metricHistory = {
+  cpu: [],
+  memory: [],
+  storage: [],
+  network: [],
+};
+const HISTORY_LIMIT = 40;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * 52;
+const GAUGE_ARC_LENGTH = GAUGE_CIRCUMFERENCE * 0.75;
 
 function notify(message, type = "info") {
   const toast = document.createElement("div");
@@ -115,20 +129,85 @@ function gaugeTone(percent = 0) {
   return "tone-green";
 }
 
-function setGauge({ fill, value, text }, percent = 0, detail = "") {
+function setGauge(gauge, percent = 0, detail = "") {
   const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
   const tone = gaugeTone(safePercent);
-  if (fill) {
-    fill.style.width = `${safePercent}%`;
-    fill.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
-    fill.classList.add(tone);
+  const needleAngle = -135 + (safePercent / 100) * 270;
+
+  if (gauge?.arc) {
+    const arcLength = (GAUGE_ARC_LENGTH * safePercent) / 100;
+    gauge.arc.style.strokeDasharray = `${arcLength} ${GAUGE_CIRCUMFERENCE}`;
   }
-  if (value) {
-    value.textContent = `${safePercent.toFixed(1)}%`;
+
+  if (gauge?.needle) {
+    gauge.needle.style.setProperty("--needle-rotation", `${needleAngle}deg`);
+    gauge.needle.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
+    gauge.needle.classList.add(tone);
   }
-  if (text) {
-    text.textContent = detail;
+
+  if (gauge?.value) {
+    gauge.value.textContent = `${safePercent.toFixed(1)}%`;
   }
+
+  if (gauge?.detail) {
+    gauge.detail.textContent = detail;
+  }
+}
+
+function addHistoryPoint(key, value) {
+  if (!metricHistory[key]) return;
+  const safeValue = Number.isFinite(value) ? value : 0;
+  metricHistory[key].push(safeValue);
+  if (metricHistory[key].length > HISTORY_LIMIT) {
+    metricHistory[key].shift();
+  }
+}
+
+function drawSparkline(canvas, data, color = "#38bdf8") {
+  if (!canvas || typeof canvas.getContext !== "function") return;
+  const ctx = canvas.getContext("2d");
+  const width = (canvas.width = canvas.clientWidth || 260);
+  const height = (canvas.height = canvas.clientHeight || 40);
+
+  ctx.clearRect(0, 0, width, height);
+
+  if (!data || data.length === 0) {
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.beginPath();
+    ctx.moveTo(0, height / 2);
+    ctx.lineTo(width, height / 2);
+    ctx.stroke();
+    return;
+  }
+
+  const min = Math.min(...data, 0);
+  const max = Math.max(...data, 100);
+  const range = max - min || 1;
+  const step = width / Math.max(data.length - 1, 1);
+
+  ctx.beginPath();
+  data.forEach((value, index) => {
+    const x = index * step;
+    const normalized = (value - min) / range;
+    const y = height - normalized * height;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "rgba(56, 189, 248, 0.35)";
+  ctx.shadowBlur = 8;
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = `${color}22`;
+  ctx.lineTo(width, height);
+  ctx.lineTo(0, height);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function updateNightStatus(isRunning) {
@@ -262,10 +341,10 @@ async function loadClusterPods() {
     const data = await resp.json();
     const pods = Array.isArray(data.pods) ? data.pods : [];
     const summary = data.summary || {};
-    const nodes = summary.nodes || {};
     const cpu = summary.cpu || {};
     const memory = summary.memory || {};
     const storage = summary.storage || {};
+    const network = summary.network || {};
     const podsSummary = summary.pods || {};
     const alerts = summary.alerts || {};
     const queues = summary.queues || {};
@@ -274,42 +353,66 @@ async function loadClusterPods() {
       els.metricsUpdated.textContent = new Date().toLocaleTimeString();
     }
 
+    const cpuPercent = Number(cpu.utilization_percent ?? 0);
+    const memoryPercent = Number(memory.utilization_percent ?? 0);
+    const storagePercent = Number(storage.utilization_percent ?? 0);
+    const networkPercent = Number(
+      network.utilization_percent ?? network.throughput_percent ?? 0,
+    );
+    const networkIn = Number(network.current_in_mbps ?? network.in_mbps ?? 0);
+    const networkOut = Number(network.current_out_mbps ?? network.out_mbps ?? 0);
+    const totalPods = podsSummary.total ?? pods.length;
+    const bad = podsSummary.unhealthy ?? 0;
+    const badPercent = totalPods > 0 ? (bad / totalPods) * 100 : 0;
+
     setGauge(
-      { fill: els.cpuFill, value: els.cpuPercent, text: els.cpuDetail },
-      Number(cpu.utilization_percent ?? 0),
+      { arc: els.cpuArc, needle: els.cpuNeedle, value: els.cpuPercent, detail: els.cpuDetail },
+      cpuPercent,
       `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`,
     );
 
     setGauge(
-      { fill: els.memoryFill, value: els.memoryPercent, text: els.memoryDetail },
-      Number(memory.utilization_percent ?? 0),
+      {
+        arc: els.memoryArc,
+        needle: els.memoryNeedle,
+        value: els.memoryPercent,
+        detail: els.memoryDetail,
+      },
+      memoryPercent,
       `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
     );
 
     setGauge(
-      { fill: els.storageFill, value: els.storagePercent, text: els.storageDetail },
-      Number(storage.utilization_percent ?? 0),
+      {
+        arc: els.storageArc,
+        needle: els.storageNeedle,
+        value: els.storagePercent,
+        detail: els.storageDetail,
+      },
+      storagePercent,
       `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`,
     );
 
-    const total = podsSummary.total ?? pods.length;
-    const bad = podsSummary.unhealthy ?? 0;
-    const badPercent = total > 0 ? (bad / total) * 100 : 0;
     setGauge(
-      { fill: els.podsFill, value: els.podsPercent, text: els.podsDetail },
-      podsSummary.unhealthy_percent ?? badPercent,
-      `${bad} unhealthy of ${total} pods`,
+      {
+        arc: els.networkArc,
+        needle: els.networkNeedle,
+        value: els.networkPercent,
+        detail: els.networkDetail,
+      },
+      networkPercent,
+      `${networkIn.toFixed(1)} in / ${networkOut.toFixed(1)} out Mbps`,
     );
 
-    const notReady = nodes.not_ready ?? 0;
-    const ready = nodes.ready ?? 0;
-    const nodeTotal = nodes.count ?? ready + notReady;
-    const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
-    setGauge(
-      { fill: els.nodesFill, value: els.nodesPercent, text: els.nodesDetail },
-      notReadyPercent,
-      `${ready} ready / ${notReady} not-ready`,
-    );
+    addHistoryPoint("cpu", cpuPercent);
+    addHistoryPoint("memory", memoryPercent);
+    addHistoryPoint("storage", storagePercent);
+    addHistoryPoint("network", networkPercent);
+
+    drawSparkline(els.cpuSpark, metricHistory.cpu, "#38bdf8");
+    drawSparkline(els.memorySpark, metricHistory.memory, "#c084fc");
+    drawSparkline(els.storageSpark, metricHistory.storage, "#22c55e");
+    drawSparkline(els.networkSpark, metricHistory.network, "#f59e0b");
 
     const severity = alerts.last_severity || "—";
     if (els.lastSeverity) {
@@ -330,7 +433,7 @@ async function loadClusterPods() {
     }
 
     if (els.podsTotalPill) {
-      els.podsTotalPill.textContent = `${total} pods`;
+      els.podsTotalPill.textContent = `${totalPods} pods`;
     }
 
     renderNamespaceRowsWithBar(

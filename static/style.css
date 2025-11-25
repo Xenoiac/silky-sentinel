@@ -181,9 +181,13 @@ a {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  grid-auto-rows: minmax(120px, auto);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-auto-rows: minmax(220px, auto);
   gap: 12px;
+}
+
+.kpi-grid-secondary {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 320px));
 }
 
 .card.kpi-card {
@@ -198,7 +202,7 @@ a {
 }
 
 .kpi-card-primary {
-  min-height: 130px;
+  min-height: 220px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
   border-color: rgba(56, 189, 248, 0.18);
 }
@@ -230,14 +234,117 @@ a {
 
 .kpi-card .value {
   margin: 0;
-  font-size: 1.6rem;
-  font-weight: 700;
+  font-size: 1.8rem;
+  font-weight: 800;
 }
 
 .kpi-card .subvalue {
   margin: 0;
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+.gauge-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.gauge-shell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 6px 0 10px;
+}
+
+.gauge-svg {
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 1 / 1;
+}
+
+.gauge-arc {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+  transform: rotate(-135deg);
+  transform-origin: 50% 50%;
+  stroke-dasharray: 244 314;
+  stroke-dashoffset: 39;
+  opacity: 0.9;
+}
+
+.gauge-arc-track {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+.gauge-arc-fill {
+  stroke-dasharray: 0 314;
+  transition: stroke-dasharray 200ms ease;
+}
+
+.gauge-readout {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+}
+
+.gauge-readout .subvalue {
+  font-size: 0.98rem;
+}
+
+.gauge-needle {
+  position: absolute;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: none;
+  transform: rotate(var(--needle-rotation, -135deg));
+  transition: transform 180ms ease;
+}
+
+.gauge-needle::after {
+  content: "";
+  width: 4px;
+  height: 54px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(56, 189, 248, 0.9));
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(56, 189, 248, 0.35);
+}
+
+.gauge-needle.tone-green::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(34, 197, 94, 0.95));
+  box-shadow: 0 8px 18px rgba(34, 197, 94, 0.4);
+}
+
+.gauge-needle.tone-yellow::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 158, 11, 0.95));
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.45);
+}
+
+.gauge-needle.tone-orange::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(251, 146, 60, 0.95));
+  box-shadow: 0 8px 18px rgba(251, 146, 60, 0.45);
+}
+
+.gauge-needle.tone-red::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 68, 68, 0.95));
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.5);
+}
+
+.sparkline {
+  width: 100%;
+  height: 40px;
+  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.05), transparent 40%),
+    rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 4px 0;
 }
 
 .kpi-bar {
