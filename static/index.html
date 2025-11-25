@@ -17,7 +17,7 @@
         <div class="cluster-header-left">
           <p class="eyebrow">SRE Dashboard</p>
           <h2>Cluster Overview</h2>
-          <p class="panel-subtitle">Grafana-inspired snapshot of cluster health and capacity.</p>
+          <p class="panel-subtitle">High-frequency snapshot of cluster health and capacity.</p>
         </div>
         <div class="cluster-header-right">
           <span class="pill pill-muted">
@@ -31,76 +31,148 @@
       </header>
 
       <div class="kpi-grid">
-        <article class="card kpi-card kpi-card-primary" id="card-cpu">
+        <article class="card kpi-card kpi-card-primary gauge-card" id="card-cpu">
           <div class="kpi-header">
             <span class="kpi-icon" aria-hidden="true">⚙️</span>
             <div class="kpi-title">
               <p class="label">CPU Utilization</p>
             </div>
           </div>
-          <p class="value" id="cpu-util">0%</p>
-          <p class="subvalue" id="cpu-cores">0 / 0 cores</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="cpu-bar-fill"></div>
+          <div class="gauge-shell">
+            <svg class="gauge-svg" viewBox="0 0 140 140" aria-hidden="true">
+              <defs>
+                <linearGradient id="cpu-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#22c55e" />
+                  <stop offset="60%" stop-color="#f59e0b" />
+                  <stop offset="85%" stop-color="#ef4444" />
+                </linearGradient>
+              </defs>
+              <circle class="gauge-arc gauge-arc-track" cx="70" cy="70" r="52" />
+              <circle
+                class="gauge-arc gauge-arc-fill"
+                cx="70"
+                cy="70"
+                r="52"
+                id="cpu-arc"
+                stroke="url(#cpu-gradient)"
+              />
+            </svg>
+            <div class="gauge-readout">
+              <p class="value" id="cpu-util">0%</p>
+              <p class="subvalue" id="cpu-cores">0 / 0 cores</p>
+            </div>
+            <div class="gauge-needle" id="cpu-needle" aria-hidden="true"></div>
           </div>
+          <canvas class="sparkline" id="cpu-sparkline" height="40"></canvas>
         </article>
 
-        <article class="card kpi-card kpi-card-primary" id="card-memory">
+        <article class="card kpi-card kpi-card-primary gauge-card" id="card-memory">
           <div class="kpi-header">
             <span class="kpi-icon" aria-hidden="true">🧠</span>
             <div class="kpi-title">
               <p class="label">Memory Utilization</p>
             </div>
           </div>
-          <p class="value" id="memory-util">0%</p>
-          <p class="subvalue" id="memory-usage">0 / 0 GiB</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="memory-bar-fill"></div>
+          <div class="gauge-shell">
+            <svg class="gauge-svg" viewBox="0 0 140 140" aria-hidden="true">
+              <defs>
+                <linearGradient id="memory-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#22c55e" />
+                  <stop offset="60%" stop-color="#f59e0b" />
+                  <stop offset="85%" stop-color="#ef4444" />
+                </linearGradient>
+              </defs>
+              <circle class="gauge-arc gauge-arc-track" cx="70" cy="70" r="52" />
+              <circle
+                class="gauge-arc gauge-arc-fill"
+                cx="70"
+                cy="70"
+                r="52"
+                id="memory-arc"
+                stroke="url(#memory-gradient)"
+              />
+            </svg>
+            <div class="gauge-readout">
+              <p class="value" id="memory-util">0%</p>
+              <p class="subvalue" id="memory-usage">0 / 0 GiB</p>
+            </div>
+            <div class="gauge-needle" id="memory-needle" aria-hidden="true"></div>
           </div>
+          <canvas class="sparkline" id="memory-sparkline" height="40"></canvas>
         </article>
 
-        <article class="card kpi-card kpi-card-primary" id="card-storage">
+        <article class="card kpi-card kpi-card-primary gauge-card" id="card-storage">
           <div class="kpi-header">
             <span class="kpi-icon" aria-hidden="true">💽</span>
             <div class="kpi-title">
               <p class="label">Storage Utilization</p>
             </div>
           </div>
-          <p class="value" id="storage-util">0%</p>
-          <p class="subvalue" id="storage-usage">0 / 0 GiB</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="storage-bar-fill"></div>
+          <div class="gauge-shell">
+            <svg class="gauge-svg" viewBox="0 0 140 140" aria-hidden="true">
+              <defs>
+                <linearGradient id="storage-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#22c55e" />
+                  <stop offset="60%" stop-color="#f59e0b" />
+                  <stop offset="85%" stop-color="#ef4444" />
+                </linearGradient>
+              </defs>
+              <circle class="gauge-arc gauge-arc-track" cx="70" cy="70" r="52" />
+              <circle
+                class="gauge-arc gauge-arc-fill"
+                cx="70"
+                cy="70"
+                r="52"
+                id="storage-arc"
+                stroke="url(#storage-gradient)"
+              />
+            </svg>
+            <div class="gauge-readout">
+              <p class="value" id="storage-util">0%</p>
+              <p class="subvalue" id="storage-usage">0 / 0 GiB</p>
+            </div>
+            <div class="gauge-needle" id="storage-needle" aria-hidden="true"></div>
           </div>
+          <canvas class="sparkline" id="storage-sparkline" height="40"></canvas>
         </article>
 
-        <article class="card kpi-card" id="card-pods">
+        <article class="card kpi-card kpi-card-primary gauge-card" id="card-network">
           <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">🚨</span>
+            <span class="kpi-icon" aria-hidden="true">🌐</span>
             <div class="kpi-title">
-              <p class="label">Unhealthy Pods</p>
+              <p class="label">Network Utilization</p>
             </div>
           </div>
-          <p class="value" id="pods-percent">0%</p>
-          <p class="subvalue" id="pods-detail">0 unhealthy of 0 pods</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="pods-bar-fill"></div>
-          </div>
-        </article>
-
-        <article class="card kpi-card" id="card-nodes">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">🖥️</span>
-            <div class="kpi-title">
-              <p class="label">Node Readiness</p>
+          <div class="gauge-shell">
+            <svg class="gauge-svg" viewBox="0 0 140 140" aria-hidden="true">
+              <defs>
+                <linearGradient id="network-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#22c55e" />
+                  <stop offset="60%" stop-color="#f59e0b" />
+                  <stop offset="85%" stop-color="#ef4444" />
+                </linearGradient>
+              </defs>
+              <circle class="gauge-arc gauge-arc-track" cx="70" cy="70" r="52" />
+              <circle
+                class="gauge-arc gauge-arc-fill"
+                cx="70"
+                cy="70"
+                r="52"
+                id="network-arc"
+                stroke="url(#network-gradient)"
+              />
+            </svg>
+            <div class="gauge-readout">
+              <p class="value" id="network-util">0%</p>
+              <p class="subvalue" id="network-usage">0.0 in / 0.0 out Mbps</p>
             </div>
+            <div class="gauge-needle" id="network-needle" aria-hidden="true"></div>
           </div>
-          <p class="value" id="nodes-percent">0%</p>
-          <p class="subvalue" id="nodes-detail">0 ready / 0 not-ready</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="nodes-bar-fill"></div>
-          </div>
+          <canvas class="sparkline" id="network-sparkline" height="40"></canvas>
         </article>
+      </div>
 
+      <div class="kpi-grid kpi-grid-secondary">
         <article class="card kpi-card" id="card-alerts">
           <div class="kpi-header">
             <span class="kpi-icon" aria-hidden="true">📣</span>
