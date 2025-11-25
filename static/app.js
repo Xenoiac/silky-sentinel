@@ -177,7 +177,7 @@ class Gauge {
 
   resize() {
     const { width } = this.container.getBoundingClientRect();
-    const height = Math.max(120, Math.min(180, width * 0.65));
+    const height = Math.max(118, Math.min(170, width * 0.6));
     this.canvas.width = width * 2;
     this.canvas.height = height * 2;
     this.canvas.style.height = `${height}px`;
@@ -269,7 +269,7 @@ class Gauge {
     const target = this.clamp(next);
     const start = this.value;
     const diff = target - start;
-    const duration = 450;
+    const duration = 520;
     const startTime = performance.now();
 
     const animate = (now) => {
@@ -369,8 +369,9 @@ class NetworkHistoryChart {
 
   resize() {
     if (!this.container || !this.canvas || !this.ctx) return;
-    const { width } = this.container.getBoundingClientRect();
-    const height = Math.max(52, Math.min(90, width * 0.32));
+    const { width, height: containerHeight } = this.container.getBoundingClientRect();
+    const targetHeight = containerHeight || width * 0.3;
+    const height = Math.max(52, Math.min(90, targetHeight));
     this.dpr = window.devicePixelRatio || 1;
     this.canvas.width = width * this.dpr;
     this.canvas.height = height * this.dpr;
@@ -614,8 +615,8 @@ class ReliabilityCharts {
       ctx,
       this.sliValues,
       (idx, val) => ({ x: indexToX(idx), y: valueToY(val) }),
-      "#67e8f9",
-      2.2,
+      "#22c55e",
+      2.4,
     );
 
     ctx.fillStyle = "rgba(226,232,240,0.8)";
@@ -658,7 +659,7 @@ class ReliabilityCharts {
       ctx,
       this.burnValues,
       (idx, val) => ({ x: indexToX(idx), y: valueToY(val) }),
-      "#c084fc",
+      "#a855f7",
       2.2,
     );
 
@@ -695,7 +696,7 @@ class ReliabilityCharts {
     this.timer = setInterval(() => {
       this.appendPoint();
       this.draw();
-    }, 45000);
+    }, 30000);
   }
 
   stop() {
