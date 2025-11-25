@@ -12,12 +12,19 @@ const els = {
   cpuPercent: document.getElementById("cpu-util"),
   cpuFill: document.getElementById("cpu-bar-fill"),
   cpuDetail: document.getElementById("cpu-cores"),
+  cpuGauge: document.getElementById("cpu-gauge"),
   memoryPercent: document.getElementById("memory-util"),
   memoryFill: document.getElementById("memory-bar-fill"),
   memoryDetail: document.getElementById("memory-usage"),
+  memoryGauge: document.getElementById("memory-gauge"),
   storagePercent: document.getElementById("storage-util"),
   storageFill: document.getElementById("storage-bar-fill"),
   storageDetail: document.getElementById("storage-usage"),
+  storageGauge: document.getElementById("storage-gauge"),
+  networkPercent: document.getElementById("network-util"),
+  networkFill: document.getElementById("network-bar-fill"),
+  networkDetail: document.getElementById("network-usage"),
+  networkGauge: document.getElementById("network-gauge"),
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
@@ -115,20 +122,177 @@ function gaugeTone(percent = 0) {
   return "tone-green";
 }
 
-function setGauge({ fill, value, text }, percent = 0, detail = "") {
+function setProgressBar(fill, percent = 0) {
   const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
   const tone = gaugeTone(safePercent);
-  if (fill) {
-    fill.style.width = `${safePercent}%`;
-    fill.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
-    fill.classList.add(tone);
+  if (!fill) return;
+  fill.style.width = `${safePercent}%`;
+  fill.classList.remove("tone-green", "tone-yellow", "tone-orange", "tone-red");
+  fill.classList.add(tone);
+}
+
+class Gauge {
+  constructor(container, { min = 0, max = 100, label = "", initial = 0 } = {}) {
+    this.container = container;
+    this.min = min;
+    this.max = max;
+    this.label = label;
+    this.value = this.clamp(initial);
+    this.animationFrame = null;
+
+    if (!this.container) return;
+
+    this.shell = document.createElement("div");
+    this.shell.className = "gauge-shell";
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "gauge-canvas";
+    this.shell.appendChild(this.canvas);
+
+    const overlay = document.createElement("div");
+    overlay.className = "gauge-overlay";
+    this.valueEl = document.createElement("div");
+    this.valueEl.className = "gauge-value-text";
+    this.labelEl = document.createElement("div");
+    this.labelEl.className = "gauge-label-text";
+    this.labelEl.textContent = this.label;
+    overlay.appendChild(this.valueEl);
+    overlay.appendChild(this.labelEl);
+
+    this.shell.appendChild(overlay);
+    this.container.appendChild(this.shell);
+
+    this.ctx = this.canvas.getContext("2d");
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(this.container);
+    this.resize();
+    this.draw(this.value);
   }
-  if (value) {
-    value.textContent = `${safePercent.toFixed(1)}%`;
+
+  clamp(val) {
+    const safe = Number.isFinite(val) ? val : this.min;
+    return Math.min(this.max, Math.max(this.min, safe));
   }
-  if (text) {
-    text.textContent = detail;
+
+  resize() {
+    const { width } = this.container.getBoundingClientRect();
+    const height = Math.max(120, Math.min(180, width * 0.65));
+    this.canvas.width = width * 2;
+    this.canvas.height = height * 2;
+    this.canvas.style.height = `${height}px`;
+    this.canvas.style.width = `${width}px`;
+    this.draw(this.value);
   }
+
+  angleForPercent(percent) {
+    const start = Math.PI;
+    const end = 0;
+    return start + (percent / 100) * (end - start);
+  }
+
+  draw(value) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const { width, height } = this.canvas;
+    ctx.clearRect(0, 0, width, height);
+
+    const centerX = width / 2;
+    const centerY = height * 0.9;
+    const radius = Math.min(width, height) * 0.42;
+    const lineWidth = Math.max(12, radius * 0.14);
+
+    ctx.lineCap = "round";
+
+    const segments = [
+      { start: 0, end: 70, color: "#22c55e" },
+      { start: 70, end: 85, color: "#f59e0b" },
+      { start: 85, end: 100, color: "#ef4444" },
+    ];
+
+    ctx.beginPath();
+    ctx.strokeStyle = "#1f2937";
+    ctx.lineWidth = lineWidth;
+    ctx.arc(centerX, centerY, radius, Math.PI, 0, false);
+    ctx.stroke();
+
+    segments.forEach((segment) => {
+      ctx.beginPath();
+      ctx.strokeStyle = segment.color;
+      ctx.lineWidth = lineWidth;
+      ctx.shadowColor = "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = 8;
+      ctx.arc(
+        centerX,
+        centerY,
+        radius,
+        this.angleForPercent(segment.start),
+        this.angleForPercent(segment.end),
+        false,
+      );
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    });
+
+    const percent = ((value - this.min) / (this.max - this.min)) * 100;
+    const clampedPercent = Math.min(100, Math.max(0, percent));
+    const needleAngle = this.angleForPercent(clampedPercent);
+    const needleLength = radius * 0.88;
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(needleAngle - Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(-4, 0);
+    ctx.lineTo(needleLength, 0);
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = Math.max(2, radius * 0.04);
+    ctx.shadowColor = "rgba(255, 255, 255, 0.15)";
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.fillStyle = "#0f172a";
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 3;
+    ctx.arc(centerX, centerY, lineWidth * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (this.valueEl) {
+      this.valueEl.textContent = `${Math.round(clampedPercent)}%`;
+    }
+  }
+
+  setValue(next) {
+    const target = this.clamp(next);
+    const start = this.value;
+    const diff = target - start;
+    const duration = 450;
+    const startTime = performance.now();
+
+    const animate = (now) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = start + diff * eased;
+      this.value = current;
+      this.draw(current);
+      if (progress < 1) {
+        this.animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = requestAnimationFrame(animate);
+  }
+}
+
+const gauges = {};
+
+function initGauges() {
+  gauges.cpu = new Gauge(els.cpuGauge, { label: "CPU", initial: 0 });
+  gauges.memory = new Gauge(els.memoryGauge, { label: "Memory", initial: 0 });
+  gauges.storage = new Gauge(els.storageGauge, { label: "Storage", initial: 0 });
+  gauges.network = new Gauge(els.networkGauge, { label: "Network", initial: 0 });
 }
 
 function updateNightStatus(isRunning) {
@@ -274,42 +438,71 @@ async function loadClusterPods() {
       els.metricsUpdated.textContent = new Date().toLocaleTimeString();
     }
 
-    setGauge(
-      { fill: els.cpuFill, value: els.cpuPercent, text: els.cpuDetail },
-      Number(cpu.utilization_percent ?? 0),
-      `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`,
-    );
+    const cpuPercent = Number(cpu.utilization_percent ?? 0);
+    const memoryPercent = Number(memory.utilization_percent ?? 0);
+    const storagePercent = Number(storage.utilization_percent ?? 0);
+    const networkPercent = Number(data.network?.utilization_percent ?? 55);
 
-    setGauge(
-      { fill: els.memoryFill, value: els.memoryPercent, text: els.memoryDetail },
-      Number(memory.utilization_percent ?? 0),
-      `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
-    );
+    gauges.cpu?.setValue(cpuPercent);
+    gauges.memory?.setValue(memoryPercent);
+    gauges.storage?.setValue(storagePercent);
+    gauges.network?.setValue(networkPercent);
 
-    setGauge(
-      { fill: els.storageFill, value: els.storagePercent, text: els.storageDetail },
-      Number(storage.utilization_percent ?? 0),
-      `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`,
-    );
+    if (els.cpuPercent) {
+      els.cpuPercent.textContent = `${cpuPercent.toFixed(1)}%`;
+    }
+    if (els.cpuDetail) {
+      els.cpuDetail.textContent = `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`;
+    }
+    setProgressBar(els.cpuFill, cpuPercent);
+    if (els.memoryPercent) {
+      els.memoryPercent.textContent = `${memoryPercent.toFixed(1)}%`;
+    }
+    if (els.memoryDetail) {
+      els.memoryDetail.textContent = `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`;
+    }
+    setProgressBar(els.memoryFill, memoryPercent);
+    if (els.storagePercent) {
+      els.storagePercent.textContent = `${storagePercent.toFixed(1)}%`;
+    }
+    if (els.storageDetail) {
+      els.storageDetail.textContent = `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`;
+    }
+    setProgressBar(els.storageFill, storagePercent);
+    if (els.networkPercent) {
+      els.networkPercent.textContent = `${networkPercent.toFixed(1)}%`;
+    }
+    if (els.networkDetail) {
+      const rx = data.network?.rx_mbps;
+      const tx = data.network?.tx_mbps;
+      els.networkDetail.textContent =
+        Number.isFinite(rx) && Number.isFinite(tx) ? `${rx.toFixed(1)} / ${tx.toFixed(1)} Mbps (rx/tx)` : "Live traffic";
+    }
+    setProgressBar(els.networkFill, networkPercent);
 
     const total = podsSummary.total ?? pods.length;
     const bad = podsSummary.unhealthy ?? 0;
     const badPercent = total > 0 ? (bad / total) * 100 : 0;
-    setGauge(
-      { fill: els.podsFill, value: els.podsPercent, text: els.podsDetail },
-      podsSummary.unhealthy_percent ?? badPercent,
-      `${bad} unhealthy of ${total} pods`,
-    );
+    const podPercent = podsSummary.unhealthy_percent ?? badPercent;
+    setProgressBar(els.podsFill, podPercent);
+    if (els.podsPercent) {
+      els.podsPercent.textContent = `${podPercent.toFixed(1)}%`;
+    }
+    if (els.podsDetail) {
+      els.podsDetail.textContent = `${bad} unhealthy of ${total} pods`;
+    }
 
     const notReady = nodes.not_ready ?? 0;
     const ready = nodes.ready ?? 0;
     const nodeTotal = nodes.count ?? ready + notReady;
     const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
-    setGauge(
-      { fill: els.nodesFill, value: els.nodesPercent, text: els.nodesDetail },
-      notReadyPercent,
-      `${ready} ready / ${notReady} not-ready`,
-    );
+    setProgressBar(els.nodesFill, notReadyPercent);
+    if (els.nodesPercent) {
+      els.nodesPercent.textContent = `${notReadyPercent.toFixed(1)}%`;
+    }
+    if (els.nodesDetail) {
+      els.nodesDetail.textContent = `${ready} ready / ${notReady} not-ready`;
+    }
 
     const severity = alerts.last_severity || "—";
     if (els.lastSeverity) {
@@ -1258,6 +1451,7 @@ function startPolling() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  initGauges();
   setupPodsInfiniteScroll();
   loadClusterPods();
   loadNightStatus();

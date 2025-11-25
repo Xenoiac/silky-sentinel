@@ -38,6 +38,7 @@
               <p class="label">CPU Utilization</p>
             </div>
           </div>
+          <div class="gauge-holder" id="cpu-gauge"></div>
           <p class="value" id="cpu-util">0%</p>
           <p class="subvalue" id="cpu-cores">0 / 0 cores</p>
           <div class="kpi-bar" aria-hidden="true">
@@ -52,6 +53,7 @@
               <p class="label">Memory Utilization</p>
             </div>
           </div>
+          <div class="gauge-holder" id="memory-gauge"></div>
           <p class="value" id="memory-util">0%</p>
           <p class="subvalue" id="memory-usage">0 / 0 GiB</p>
           <div class="kpi-bar" aria-hidden="true">
@@ -66,10 +68,26 @@
               <p class="label">Storage Utilization</p>
             </div>
           </div>
+          <div class="gauge-holder" id="storage-gauge"></div>
           <p class="value" id="storage-util">0%</p>
           <p class="subvalue" id="storage-usage">0 / 0 GiB</p>
           <div class="kpi-bar" aria-hidden="true">
             <div class="kpi-bar-fill" id="storage-bar-fill"></div>
+          </div>
+        </article>
+
+        <article class="card kpi-card kpi-card-primary" id="card-network">
+          <div class="kpi-header">
+            <span class="kpi-icon" aria-hidden="true">📡</span>
+            <div class="kpi-title">
+              <p class="label">Network Utilization</p>
+            </div>
+          </div>
+          <div class="gauge-holder" id="network-gauge"></div>
+          <p class="value" id="network-util">0%</p>
+          <p class="subvalue" id="network-usage">—</p>
+          <div class="kpi-bar" aria-hidden="true">
+            <div class="kpi-bar-fill" id="network-bar-fill"></div>
           </div>
         </article>
 
