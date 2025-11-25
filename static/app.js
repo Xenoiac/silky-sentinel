@@ -25,6 +25,7 @@ const els = {
   networkFill: document.getElementById("network-bar-fill"),
   networkDetail: document.getElementById("network-usage"),
   networkGauge: document.getElementById("network-gauge"),
+  networkHistoryChart: document.getElementById("network-history-chart"),
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
@@ -286,13 +287,205 @@ class Gauge {
   }
 }
 
+class NetworkTrafficSimulator {
+  constructor({ capacityMbps = 120, variance = 3, spikeChance = 0.08 } = {}) {
+    this.capacityMbps = capacityMbps;
+    this.variance = variance;
+    this.spikeChance = spikeChance;
+    this.baseRx = this.randomBetween(8, 18);
+    this.baseTx = this.randomBetween(6, 16);
+    this.rx = this.baseRx;
+    this.tx = this.baseTx;
+  }
+
+  randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  percentFor(rx, tx) {
+    const rxUtil = Math.min(1, rx / this.capacityMbps);
+    const txUtil = Math.min(1, tx / this.capacityMbps);
+    return Math.min(100, ((rxUtil + txUtil) / 2) * 100);
+  }
+
+  nudgeTowardsBaseline(current, base) {
+    const drift = current * 0.82 + base * 0.18;
+    const noise = this.randomBetween(-this.variance, this.variance);
+    let next = drift + noise;
+    if (Math.random() < this.spikeChance) {
+      next += base * this.randomBetween(0.25, 0.55);
+    }
+    return Math.max(0, next);
+  }
+
+  nextSample() {
+    this.rx = this.nudgeTowardsBaseline(this.rx, this.baseRx);
+    this.tx = this.nudgeTowardsBaseline(this.tx, this.baseTx);
+    return { rx: this.rx, tx: this.tx, percent: this.percentFor(this.rx, this.tx) };
+  }
+
+  seed(count = 40) {
+    const samples = [];
+    for (let i = 0; i < count; i += 1) {
+      samples.push(this.nextSample());
+    }
+    return samples;
+  }
+
+  tuneTo(rx, tx) {
+    if (Number.isFinite(rx)) {
+      this.rx = rx;
+      this.baseRx = rx;
+    }
+    if (Number.isFinite(tx)) {
+      this.tx = tx;
+      this.baseTx = tx;
+    }
+  }
+}
+
+class NetworkHistoryChart {
+  constructor(container, { capacity = 60 } = {}) {
+    this.container = container;
+    this.capacity = capacity;
+    this.rx = [];
+    this.tx = [];
+    this.canvas = null;
+    this.ctx = null;
+    this.dpr = window.devicePixelRatio || 1;
+
+    if (this.container) {
+      this.canvas = this.container.querySelector("canvas") || document.createElement("canvas");
+      if (!this.canvas.parentElement) {
+        this.container.appendChild(this.canvas);
+      }
+      this.ctx = this.canvas.getContext("2d");
+      this.resizeObserver = new ResizeObserver(() => this.resize());
+      this.resizeObserver.observe(this.container);
+      this.resize();
+    }
+  }
+
+  resize() {
+    if (!this.container || !this.canvas || !this.ctx) return;
+    const { width } = this.container.getBoundingClientRect();
+    const height = Math.max(52, Math.min(90, width * 0.32));
+    this.dpr = window.devicePixelRatio || 1;
+    this.canvas.width = width * this.dpr;
+    this.canvas.height = height * this.dpr;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.draw();
+  }
+
+  setData(samples = []) {
+    this.rx = [];
+    this.tx = [];
+    samples.forEach((sample) => this.addSample(sample, false));
+    this.draw();
+  }
+
+  addSample(sample, redraw = true) {
+    if (!sample) return;
+    if (Number.isFinite(sample.rx)) this.rx.push(sample.rx);
+    if (Number.isFinite(sample.tx)) this.tx.push(sample.tx);
+    if (this.rx.length > this.capacity) this.rx.shift();
+    if (this.tx.length > this.capacity) this.tx.shift();
+    if (redraw) this.draw();
+  }
+
+  drawLine(series, color, width, points) {
+    if (!this.ctx || series.length < 2) return;
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    series.forEach((value, idx) => {
+      const { x, y } = points(idx, value);
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  draw() {
+    if (!this.ctx || !this.canvas) return;
+    const ctx = this.ctx;
+    const width = this.canvas.width / this.dpr;
+    const height = this.canvas.height / this.dpr;
+    ctx.clearRect(0, 0, width, height);
+
+    const padding = 10;
+    const usableWidth = Math.max(10, width - padding * 2);
+    const usableHeight = Math.max(10, height - padding * 2);
+    const maxVal = Math.max(...this.rx, ...this.tx, 1);
+    const paddedMax = maxVal * 1.2;
+
+    const valueToY = (val) => padding + usableHeight - (val / paddedMax) * usableHeight;
+    const indexToX = (idx, total) => padding + (total <= 1 ? usableWidth : (idx / (total - 1)) * usableWidth);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    const gridLines = 3;
+    for (let i = 0; i <= gridLines; i += 1) {
+      const y = padding + (usableHeight / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(width - padding, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(226,232,240,0.7)";
+    ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(paddedMax)} Mbps`, width - padding, padding + 8);
+
+    const totalPoints = Math.max(this.rx.length, this.tx.length);
+    const pointMapper = (idx, val) => ({ x: indexToX(idx, totalPoints), y: valueToY(val) });
+
+    this.drawLine(this.rx, "#38bdf8", 2, (idx, val) => pointMapper(idx, val));
+    this.drawLine(this.tx, "#a78bfa", 2, (idx, val) => pointMapper(idx, val));
+
+    ctx.fillStyle = "rgba(226,232,240,0.8)";
+    ctx.font = "9px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("RX", padding + 2, padding + 10);
+    ctx.fillStyle = "rgba(226,232,240,0.7)";
+    ctx.fillText("TX", padding + 26, padding + 10);
+  }
+}
+
 const gauges = {};
+const charts = {};
+const networkSimulator = new NetworkTrafficSimulator();
 
 function initGauges() {
   gauges.cpu = new Gauge(els.cpuGauge, { label: "CPU", initial: 0 });
   gauges.memory = new Gauge(els.memoryGauge, { label: "Memory", initial: 0 });
   gauges.storage = new Gauge(els.storageGauge, { label: "Storage", initial: 0 });
   gauges.network = new Gauge(els.networkGauge, { label: "Network", initial: 0 });
+}
+
+let networkMockTimer = null;
+
+function startNetworkMockFeed() {
+  if (networkMockTimer) clearInterval(networkMockTimer);
+  networkMockTimer = setInterval(() => {
+    const sample = networkSimulator.nextSample();
+    applyNetworkSample(sample);
+  }, 5000);
+}
+
+function initNetworkHistory() {
+  if (!els.networkHistoryChart) return;
+  charts.networkHistory = new NetworkHistoryChart(els.networkHistoryChart, { capacity: 60 });
+  const seed = networkSimulator.seed(40);
+  charts.networkHistory.setData(seed);
+  applyNetworkSample(seed[seed.length - 1]);
+  startNetworkMockFeed();
 }
 
 function updateNightStatus(isRunning) {
@@ -419,6 +612,42 @@ function setupPodsInfiniteScroll() {
   });
 }
 
+function applyNetworkSample(sample = {}) {
+  const percent = Number.isFinite(sample.percent) ? sample.percent : 0;
+  const rx = Number(sample.rx);
+  const tx = Number(sample.tx);
+
+  gauges.network?.setValue(percent);
+  if (els.networkPercent) {
+    els.networkPercent.textContent = `${percent.toFixed(1)}%`;
+  }
+  if (els.networkDetail) {
+    if (Number.isFinite(rx) && Number.isFinite(tx)) {
+      els.networkDetail.textContent = `${rx.toFixed(1)} / ${tx.toFixed(1)} Mbps (rx/tx)`;
+    } else {
+      els.networkDetail.textContent = "Live traffic";
+    }
+  }
+  setProgressBar(els.networkFill, percent);
+
+  if (charts.networkHistory && Number.isFinite(rx) && Number.isFinite(tx)) {
+    charts.networkHistory.addSample({ rx, tx });
+  }
+}
+
+function buildNetworkSample(networkData = {}) {
+  const rx = Number(networkData?.rx_mbps);
+  const tx = Number(networkData?.tx_mbps);
+  const percentFromData = Number(networkData?.utilization_percent);
+
+  if (Number.isFinite(rx) && Number.isFinite(tx)) {
+    networkSimulator.tuneTo(rx, tx);
+    return { rx, tx, percent: Number.isFinite(percentFromData) ? percentFromData : networkSimulator.percentFor(rx, tx) };
+  }
+
+  return networkSimulator.nextSample();
+}
+
 async function loadClusterPods() {
   try {
     const resp = await fetch("/api/cluster/pods");
@@ -441,12 +670,12 @@ async function loadClusterPods() {
     const cpuPercent = Number(cpu.utilization_percent ?? 0);
     const memoryPercent = Number(memory.utilization_percent ?? 0);
     const storagePercent = Number(storage.utilization_percent ?? 0);
-    const networkPercent = Number(data.network?.utilization_percent ?? 55);
+    const networkSample = buildNetworkSample(data.network);
 
     gauges.cpu?.setValue(cpuPercent);
     gauges.memory?.setValue(memoryPercent);
     gauges.storage?.setValue(storagePercent);
-    gauges.network?.setValue(networkPercent);
+    applyNetworkSample(networkSample);
 
     if (els.cpuPercent) {
       els.cpuPercent.textContent = `${cpuPercent.toFixed(1)}%`;
@@ -469,16 +698,6 @@ async function loadClusterPods() {
       els.storageDetail.textContent = `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`;
     }
     setProgressBar(els.storageFill, storagePercent);
-    if (els.networkPercent) {
-      els.networkPercent.textContent = `${networkPercent.toFixed(1)}%`;
-    }
-    if (els.networkDetail) {
-      const rx = data.network?.rx_mbps;
-      const tx = data.network?.tx_mbps;
-      els.networkDetail.textContent =
-        Number.isFinite(rx) && Number.isFinite(tx) ? `${rx.toFixed(1)} / ${tx.toFixed(1)} Mbps (rx/tx)` : "Live traffic";
-    }
-    setProgressBar(els.networkFill, networkPercent);
 
     const total = podsSummary.total ?? pods.length;
     const bad = podsSummary.unhealthy ?? 0;
@@ -1452,6 +1671,7 @@ function startPolling() {
 
 window.addEventListener("DOMContentLoaded", () => {
   initGauges();
+  initNetworkHistory();
   setupPodsInfiniteScroll();
   loadClusterPods();
   loadNightStatus();
