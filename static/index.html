@@ -17,7 +17,7 @@
         <div class="cluster-header-left">
           <p class="eyebrow">SRE Dashboard</p>
           <h2>Cluster Overview</h2>
-          <p class="panel-subtitle">Grafana-inspired snapshot of cluster health and capacity.</p>
+          <p class="panel-subtitle">Live snapshot of cluster capacity and utilization.</p>
         </div>
         <div class="cluster-header-right">
           <span class="pill pill-muted">
@@ -30,88 +30,181 @@
         </div>
       </header>
 
-      <div class="kpi-grid">
-        <article class="card kpi-card kpi-card-primary" id="card-cpu">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">⚙️</span>
-            <div class="kpi-title">
-              <p class="label">CPU Utilization</p>
+      <div class="cluster-overview-grid">
+        <aside class="cluster-overview-left">
+          <article class="card mini-gauges">
+            <header class="mini-panel-header">
+              <h3>Resource Snapshot</h3>
+              <span class="pill subtle-pill">Live</span>
+            </header>
+            <div class="mini-gauge">
+              <div class="mini-gauge-head">
+                <span class="label">CPU Utilization</span>
+                <span class="value" id="cpu-util">0%</span>
+              </div>
+              <p class="mini-gauge-detail" id="cpu-cores">0 / 0 cores</p>
+              <div class="gauge-bar" aria-hidden="true">
+                <div class="gauge-fill" id="cpu-bar-fill"></div>
+              </div>
             </div>
-          </div>
-          <p class="value" id="cpu-util">0%</p>
-          <p class="subvalue" id="cpu-cores">0 / 0 cores</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="cpu-bar-fill"></div>
-          </div>
-        </article>
+            <div class="mini-gauge">
+              <div class="mini-gauge-head">
+                <span class="label">Memory Utilization</span>
+                <span class="value" id="memory-util">0%</span>
+              </div>
+              <p class="mini-gauge-detail" id="memory-usage">0 / 0 GiB</p>
+              <div class="gauge-bar" aria-hidden="true">
+                <div class="gauge-fill" id="memory-bar-fill"></div>
+              </div>
+            </div>
+            <div class="mini-gauge">
+              <div class="mini-gauge-head">
+                <span class="label">Storage Utilization</span>
+                <span class="value" id="storage-util">0%</span>
+              </div>
+              <p class="mini-gauge-detail" id="storage-usage">0 / 0 GiB</p>
+              <div class="gauge-bar" aria-hidden="true">
+                <div class="gauge-fill" id="storage-bar-fill"></div>
+              </div>
+            </div>
+            <div class="mini-gauge">
+              <div class="mini-gauge-head">
+                <span class="label">Workload Health</span>
+                <span class="value" id="pods-percent">0%</span>
+              </div>
+              <p class="mini-gauge-detail" id="pods-detail">0 unhealthy of 0 pods</p>
+              <div class="gauge-bar" aria-hidden="true">
+                <div class="gauge-fill" id="pods-bar-fill"></div>
+              </div>
+            </div>
+          </article>
 
-        <article class="card kpi-card kpi-card-primary" id="card-memory">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">🧠</span>
-            <div class="kpi-title">
-              <p class="label">Memory Utilization</p>
+          <article class="card alert-pulse" id="card-alerts">
+            <header class="mini-panel-header">
+              <h3>Alerting Pulse</h3>
+              <span class="pill subtle-pill">Live</span>
+            </header>
+            <div class="alert-body">
+              <div class="alert-severity">
+                <p class="label">Last severity</p>
+                <p class="value" id="last-severity">—</p>
+              </div>
+              <p class="subvalue" id="nodes-detail">0 ready / 0 not-ready</p>
+              <p class="subvalue" id="alert-incidents">Open incidents: 0</p>
+              <p class="subvalue" id="alert-queues">Queues disabled</p>
             </div>
-          </div>
-          <p class="value" id="memory-util">0%</p>
-          <p class="subvalue" id="memory-usage">0 / 0 GiB</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="memory-bar-fill"></div>
-          </div>
-        </article>
+          </article>
+        </aside>
 
-        <article class="card kpi-card kpi-card-primary" id="card-storage">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">💽</span>
-            <div class="kpi-title">
-              <p class="label">Storage Utilization</p>
-            </div>
-          </div>
-          <p class="value" id="storage-util">0%</p>
-          <p class="subvalue" id="storage-usage">0 / 0 GiB</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="storage-bar-fill"></div>
-          </div>
-        </article>
+        <section class="cluster-overview-main">
+          <div class="chart-grid">
+            <article class="card chart-card">
+              <header class="chart-card-header">
+                <div>
+                  <p class="label">CPU</p>
+                  <h3>Utilization</h3>
+                </div>
+                <span class="pill subtle-pill">Live</span>
+              </header>
+              <div class="chart-body">
+                <div class="chart-placeholder">
+                  <div class="sparkline" id="cpu-trend" aria-hidden="true"></div>
+                </div>
+                <div class="chart-meta">
+                  <p class="chart-value" id="cpu-chart-value">0%</p>
+                  <p class="chart-subvalue" id="cpu-chart-detail">0 / 0 cores</p>
+                </div>
+              </div>
+            </article>
 
-        <article class="card kpi-card" id="card-pods">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">🚨</span>
-            <div class="kpi-title">
-              <p class="label">Unhealthy Pods</p>
-            </div>
-          </div>
-          <p class="value" id="pods-percent">0%</p>
-          <p class="subvalue" id="pods-detail">0 unhealthy of 0 pods</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="pods-bar-fill"></div>
-          </div>
-        </article>
+            <article class="card chart-card">
+              <header class="chart-card-header">
+                <div>
+                  <p class="label">Memory</p>
+                  <h3>Utilization</h3>
+                </div>
+                <span class="pill subtle-pill">Live</span>
+              </header>
+              <div class="chart-body">
+                <div class="chart-placeholder">
+                  <div class="sparkline" id="memory-trend" aria-hidden="true"></div>
+                </div>
+                <div class="chart-meta">
+                  <p class="chart-value" id="memory-chart-value">0%</p>
+                  <p class="chart-subvalue" id="memory-chart-detail">0 / 0 GiB</p>
+                </div>
+              </div>
+            </article>
 
-        <article class="card kpi-card" id="card-nodes">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">🖥️</span>
-            <div class="kpi-title">
-              <p class="label">Node Readiness</p>
-            </div>
-          </div>
-          <p class="value" id="nodes-percent">0%</p>
-          <p class="subvalue" id="nodes-detail">0 ready / 0 not-ready</p>
-          <div class="kpi-bar" aria-hidden="true">
-            <div class="kpi-bar-fill" id="nodes-bar-fill"></div>
-          </div>
-        </article>
+            <article class="card chart-card">
+              <header class="chart-card-header">
+                <div>
+                  <p class="label">Disk</p>
+                  <h3>Capacity</h3>
+                </div>
+                <span class="pill subtle-pill">Live</span>
+              </header>
+              <div class="chart-body">
+                <div class="chart-placeholder">
+                  <div class="sparkline" id="storage-trend" aria-hidden="true"></div>
+                </div>
+                <div class="chart-meta">
+                  <p class="chart-value" id="storage-chart-value">0%</p>
+                  <p class="chart-subvalue" id="storage-chart-detail">0 / 0 GiB</p>
+                </div>
+              </div>
+            </article>
 
-        <article class="card kpi-card" id="card-alerts">
-          <div class="kpi-header">
-            <span class="kpi-icon" aria-hidden="true">📣</span>
-            <div class="kpi-title">
-              <p class="label">Alerting</p>
-            </div>
+            <article class="card chart-card">
+              <header class="chart-card-header">
+                <div>
+                  <p class="label">Network</p>
+                  <h3>Throughput</h3>
+                </div>
+                <span class="pill subtle-pill">Live</span>
+              </header>
+              <div class="chart-body">
+                <div class="chart-placeholder">
+                  <div class="sparkline" id="network-trend" aria-hidden="true"></div>
+                </div>
+                <div class="chart-meta">
+                  <p class="chart-value" id="network-chart-value">0 bps</p>
+                  <p class="chart-subvalue" id="network-chart-detail">Awaiting telemetry</p>
+                </div>
+              </div>
+            </article>
           </div>
-          <p class="value" id="last-severity">—</p>
-          <p class="subvalue" id="alert-incidents">Open incidents: 0</p>
-          <p class="subvalue" id="alert-queues">Queues disabled</p>
-        </article>
+        </section>
+
+        <section class="cluster-overview-bottom">
+          <div class="bottom-grid">
+            <article class="card mini-panel">
+              <header class="mini-panel-header">
+                <h3>Namespaces by CPU</h3>
+                <span class="pill subtle-pill">Top 5</span>
+              </header>
+              <table class="compact-table">
+                <thead>
+                  <tr><th>Namespace</th><th>CPU (m)</th><th>Pods</th></tr>
+                </thead>
+                <tbody id="ns-top-cpu-overview"></tbody>
+              </table>
+            </article>
+
+            <article class="card mini-panel">
+              <header class="mini-panel-header">
+                <h3>Namespaces by Memory</h3>
+                <span class="pill subtle-pill">Top 5</span>
+              </header>
+              <table class="compact-table">
+                <thead>
+                  <tr><th>Namespace</th><th>Memory (Mi)</th><th>Pods</th></tr>
+                </thead>
+                <tbody id="ns-top-memory-overview"></tbody>
+              </table>
+            </article>
+          </div>
+        </section>
       </div>
 
       <div class="error-banner" id="cluster-errors" hidden>

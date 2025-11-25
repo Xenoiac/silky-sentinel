@@ -21,13 +21,25 @@ const els = {
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
-  nodesPercent: document.getElementById("nodes-percent"),
-  nodesFill: document.getElementById("nodes-bar-fill"),
   nodesDetail: document.getElementById("nodes-detail"),
   alertIncidents: document.getElementById("alert-incidents"),
   alertQueues: document.getElementById("alert-queues"),
+  cpuChartValue: document.getElementById("cpu-chart-value"),
+  cpuChartDetail: document.getElementById("cpu-chart-detail"),
+  cpuTrend: document.getElementById("cpu-trend"),
+  memoryChartValue: document.getElementById("memory-chart-value"),
+  memoryChartDetail: document.getElementById("memory-chart-detail"),
+  memoryTrend: document.getElementById("memory-trend"),
+  storageChartValue: document.getElementById("storage-chart-value"),
+  storageChartDetail: document.getElementById("storage-chart-detail"),
+  storageTrend: document.getElementById("storage-trend"),
+  networkChartValue: document.getElementById("network-chart-value"),
+  networkChartDetail: document.getElementById("network-chart-detail"),
+  networkTrend: document.getElementById("network-trend"),
   nsTopCpu: document.getElementById("ns-top-cpu"),
   nsTopMemory: document.getElementById("ns-top-memory"),
+  nsTopCpuOverview: document.getElementById("ns-top-cpu-overview"),
+  nsTopMemoryOverview: document.getElementById("ns-top-memory-overview"),
   nsUnhealthy: document.getElementById("ns-unhealthy"),
   podsTotalPill: document.getElementById("pods-total-pill"),
   errorBanner: document.getElementById("cluster-errors"),
@@ -128,6 +140,21 @@ function setGauge({ fill, value, text }, percent = 0, detail = "") {
   }
   if (text) {
     text.textContent = detail;
+  }
+}
+
+function updateTrendCard(elements, valueText = "—", detailText = "", percent = 0) {
+  if (!elements) return;
+  const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+  if (elements.value) {
+    elements.value.textContent = valueText;
+  }
+  if (elements.detail) {
+    elements.detail.textContent = detailText;
+  }
+  if (elements.trend) {
+    elements.trend.style.opacity = 0.55 + safePercent / 220;
+    elements.trend.style.transform = `scaleY(${1 + safePercent / 220})`;
   }
 }
 
@@ -269,6 +296,7 @@ async function loadClusterPods() {
     const podsSummary = summary.pods || {};
     const alerts = summary.alerts || {};
     const queues = summary.queues || {};
+    const network = summary.network || {};
 
     if (els.metricsUpdated) {
       els.metricsUpdated.textContent = new Date().toLocaleTimeString();
@@ -303,18 +331,45 @@ async function loadClusterPods() {
 
     const notReady = nodes.not_ready ?? 0;
     const ready = nodes.ready ?? 0;
-    const nodeTotal = nodes.count ?? ready + notReady;
-    const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
-    setGauge(
-      { fill: els.nodesFill, value: els.nodesPercent, text: els.nodesDetail },
-      notReadyPercent,
-      `${ready} ready / ${notReady} not-ready`,
-    );
+    if (els.nodesDetail) {
+      els.nodesDetail.textContent = `${ready} ready / ${notReady} not-ready`;
+    }
 
     const severity = alerts.last_severity || "—";
     if (els.lastSeverity) {
       els.lastSeverity.textContent = severity === "—" ? "—" : severity.toString().toUpperCase();
     }
+
+    updateTrendCard(
+      { value: els.cpuChartValue, detail: els.cpuChartDetail, trend: els.cpuTrend },
+      `${Number(cpu.utilization_percent ?? 0).toFixed(1)}%`,
+      `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`,
+      Number(cpu.utilization_percent ?? 0),
+    );
+
+    updateTrendCard(
+      { value: els.memoryChartValue, detail: els.memoryChartDetail, trend: els.memoryTrend },
+      `${Number(memory.utilization_percent ?? 0).toFixed(1)}%`,
+      `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`,
+      Number(memory.utilization_percent ?? 0),
+    );
+
+    updateTrendCard(
+      { value: els.storageChartValue, detail: els.storageChartDetail, trend: els.storageTrend },
+      `${Number(storage.utilization_percent ?? 0).toFixed(1)}%`,
+      `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`,
+      Number(storage.utilization_percent ?? 0),
+    );
+
+    const ingressMbps = Number(network.ingress_mbps ?? network.ingress ?? 0);
+    const egressMbps = Number(network.egress_mbps ?? network.egress ?? 0);
+    const throughputMbps = ingressMbps + egressMbps;
+    updateTrendCard(
+      { value: els.networkChartValue, detail: els.networkChartDetail, trend: els.networkTrend },
+      `${throughputMbps.toFixed(1)} Mbps`,
+      `Ingress ${ingressMbps.toFixed(1)} / Egress ${egressMbps.toFixed(1)} Mbps`,
+      Number(network.utilization_percent ?? throughputMbps),
+    );
 
     updateOverallHealth(podsSummary.unhealthy_percent ?? badPercent, severity);
     if (els.alertIncidents) {
@@ -341,6 +396,18 @@ async function loadClusterPods() {
 
     renderNamespaceRowsWithBar(
       els.nsTopMemory,
+      data.namespaces?.top_by_memory || [],
+      "memory_mib",
+    );
+
+    renderNamespaceRowsWithBar(
+      els.nsTopCpuOverview,
+      data.namespaces?.top_by_cpu || [],
+      "cpu_mcores",
+    );
+
+    renderNamespaceRowsWithBar(
+      els.nsTopMemoryOverview,
       data.namespaces?.top_by_memory || [],
       "memory_mib",
     );
