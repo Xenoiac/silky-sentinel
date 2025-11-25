@@ -645,7 +645,7 @@ def agent_engine_step(
             "state": state,
         }
 
-    ran: Optional[Dict[str, Any]] = None
+    ran: Optional[Dict[str, Any]] = state.pop("pending_ran", None)
 
     if user_decision:
         decision_type = user_decision.get("type") or user_decision.get("decision")
@@ -670,6 +670,18 @@ def agent_engine_step(
                 "summary": command_notes.get("summary", ""),
                 "highlights": command_notes.get("highlights", []),
             }
+            state["pending_ran"] = ran
+            running_message = proposal.get(
+                "running_message",
+                f"Executing command to {proposal.get('reason', 'proceed')}...",
+            )
+            return {
+                "status": "running_command",
+                "action": "run_command",
+                "command": proposal_command,
+                "running_message": running_message,
+                "state": state,
+            }
         elif decision_type == "approve" and proposal_action == "analyze_log":
             log_path = proposal.get("log_path") or ""
             digest = analyze_logs_locally(
@@ -686,6 +698,14 @@ def agent_engine_step(
                 "type": "analyze_log",
                 "log_path": log_path,
                 "digest": digest,
+            }
+            state["pending_ran"] = ran
+            return {
+                "status": "running_command",
+                "action": "analyze_log",
+                "log_path": log_path,
+                "running_message": f"Analyzing log at {log_path}...",
+                "state": state,
             }
         elif decision_type == "deny" and proposal_action == "run_command" and proposal_command:
             deny_msg = f"The user denied running the command: {proposal_command}"
@@ -953,6 +973,18 @@ def agent_session(initial_query: str, max_steps: int = 8):
             print("-----------------------------------------\n")
 
         status = step_result.get("status")
+
+        if status == "running_command":
+            cmd = (
+                step_result.get("command")
+                or step_result.get("proposed_command")
+                or (ran or {}).get("command", "")
+            )
+            running_message = step_result.get("running_message") or (
+                f"Running {cmd}..." if cmd else "Running command..."
+            )
+            print(f"[EXEC] {running_message}")
+            continue
 
         if status == "need_approval":
             action = step_result.get("action")

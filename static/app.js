@@ -995,7 +995,7 @@ function renderAgentStep(data, { reset = false } = {}) {
         statusTone: "status-running",
       });
     }
-    setAgentRunning(lastAgentCard);
+    setAgentRunning(lastAgentCard, data.running_message || "Running…");
   }
 
   if (hasCommandOutput) {

@@ -150,13 +150,18 @@ def _format_agent_step_response(session_id: str, result: Dict[str, Any]) -> Dict
     if result.get("status") == "done":
         response["final_answer"] = result.get("final_answer")
 
+    if result.get("status") == "running_command":
+        response["running_message"] = result.get("running_message")
+        response["command"] = result.get("command") or result.get("proposed_command")
+        response["log_path"] = result.get("log_path")
+
     ran = result.get("ran")
     if ran:
         response["ran"] = {
             "type": ran.get("type"),
             "command": ran.get("command"),
         }
-        if ran.get("type") == "command":
+        if ran.get("type") == "command" and result.get("status") != "running_command":
             response["command_output"] = ran.get("summary")
             response["highlights"] = ran.get("highlights") or []
 
