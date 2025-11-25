@@ -32,6 +32,40 @@
 
       <div class="cluster-overview-grid">
         <aside class="cluster-overview-left">
+          <article class="card dial-card">
+            <header class="mini-panel-header">
+              <div>
+                <p class="label">Live Load</p>
+                <h3>Cluster Speedometer</h3>
+              </div>
+              <span class="pill subtle-pill">Auto-refresh</span>
+            </header>
+            <div class="dial-gauge" aria-hidden="true">
+              <div class="dial-track"></div>
+              <div class="dial-fill" id="cluster-dial-fill"></div>
+              <div class="dial-needle" id="cluster-dial-needle"></div>
+              <div class="dial-center">
+                <p class="dial-label">Engine Load</p>
+                <p class="dial-value" id="cluster-dial-value">0%</p>
+                <p class="dial-subvalue" id="cluster-dial-detail">Ready to accelerate</p>
+              </div>
+            </div>
+            <div class="dial-history">
+              <div class="history-strip">
+                <span class="history-label">Pressure</span>
+                <div class="history-bar">
+                  <div class="history-fill" id="dial-history-pressure"></div>
+                </div>
+              </div>
+              <div class="history-strip">
+                <span class="history-label">Stability</span>
+                <div class="history-bar">
+                  <div class="history-fill" id="dial-history-stability"></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
           <article class="card mini-gauges">
             <header class="mini-panel-header">
               <h3>Resource Snapshot</h3>
@@ -79,19 +113,40 @@
             </div>
           </article>
 
-          <article class="card alert-pulse" id="card-alerts">
+          <article class="card signals-card">
             <header class="mini-panel-header">
-              <h3>Alerting Pulse</h3>
+              <h3>SRE Signals</h3>
               <span class="pill subtle-pill">Live</span>
             </header>
-            <div class="alert-body">
-              <div class="alert-severity">
-                <p class="label">Last severity</p>
-                <p class="value" id="last-severity">—</p>
+            <div class="signals-grid">
+              <div class="signal">
+                <p class="label">Node readiness</p>
+                <p class="signal-value" id="signal-nodes">0 ready / 0 down</p>
+                <div class="micro-bar">
+                  <div class="micro-fill" id="signal-nodes-bar"></div>
+                </div>
               </div>
-              <p class="subvalue" id="nodes-detail">0 ready / 0 not-ready</p>
-              <p class="subvalue" id="alert-incidents">Open incidents: 0</p>
-              <p class="subvalue" id="alert-queues">Queues disabled</p>
+              <div class="signal">
+                <p class="label">Saturation</p>
+                <p class="signal-value" id="signal-saturation">0%</p>
+                <div class="micro-bar">
+                  <div class="micro-fill" id="signal-saturation-bar"></div>
+                </div>
+              </div>
+              <div class="signal">
+                <p class="label">Incidents</p>
+                <p class="signal-value" id="signal-incidents">0 open</p>
+                <div class="micro-bar">
+                  <div class="micro-fill micro-warm" id="signal-incidents-bar"></div>
+                </div>
+              </div>
+              <div class="signal">
+                <p class="label">Queue backlog</p>
+                <p class="signal-value" id="signal-queues">Queues disabled</p>
+                <div class="micro-bar">
+                  <div class="micro-fill micro-cool" id="signal-queues-bar"></div>
+                </div>
+              </div>
             </div>
           </article>
         </aside>
@@ -108,6 +163,7 @@
               </header>
               <div class="chart-body">
                 <div class="chart-placeholder">
+                  <div class="chart-gridline"></div>
                   <div class="sparkline" id="cpu-trend" aria-hidden="true"></div>
                 </div>
                 <div class="chart-meta">
@@ -127,6 +183,7 @@
               </header>
               <div class="chart-body">
                 <div class="chart-placeholder">
+                  <div class="chart-gridline"></div>
                   <div class="sparkline" id="memory-trend" aria-hidden="true"></div>
                 </div>
                 <div class="chart-meta">
@@ -146,6 +203,7 @@
               </header>
               <div class="chart-body">
                 <div class="chart-placeholder">
+                  <div class="chart-gridline"></div>
                   <div class="sparkline" id="storage-trend" aria-hidden="true"></div>
                 </div>
                 <div class="chart-meta">
@@ -165,6 +223,7 @@
               </header>
               <div class="chart-body">
                 <div class="chart-placeholder">
+                  <div class="chart-gridline"></div>
                   <div class="sparkline" id="network-trend" aria-hidden="true"></div>
                 </div>
                 <div class="chart-meta">

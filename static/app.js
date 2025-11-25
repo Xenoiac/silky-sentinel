@@ -4,11 +4,16 @@ const NIGHT_START_ENDPOINT = "/api/night/start";
 const NIGHT_STOP_ENDPOINT = "/api/night/stop";
 
 const els = {
-  lastSeverity: document.getElementById("last-severity"),
   metricsUpdated: document.getElementById("metrics-updated-at"),
   overallHealth: document.getElementById("overall-health-pill"),
   podsTableBody: document.getElementById("pods-table-body"),
   podsTableContainer: document.getElementById("pods-table-container"),
+  dialValue: document.getElementById("cluster-dial-value"),
+  dialDetail: document.getElementById("cluster-dial-detail"),
+  dialFill: document.getElementById("cluster-dial-fill"),
+  dialNeedle: document.getElementById("cluster-dial-needle"),
+  dialHistoryPressure: document.getElementById("dial-history-pressure"),
+  dialHistoryStability: document.getElementById("dial-history-stability"),
   cpuPercent: document.getElementById("cpu-util"),
   cpuFill: document.getElementById("cpu-bar-fill"),
   cpuDetail: document.getElementById("cpu-cores"),
@@ -21,9 +26,14 @@ const els = {
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
-  nodesDetail: document.getElementById("nodes-detail"),
-  alertIncidents: document.getElementById("alert-incidents"),
-  alertQueues: document.getElementById("alert-queues"),
+  signalNodes: document.getElementById("signal-nodes"),
+  signalNodesBar: document.getElementById("signal-nodes-bar"),
+  signalSaturation: document.getElementById("signal-saturation"),
+  signalSaturationBar: document.getElementById("signal-saturation-bar"),
+  signalIncidents: document.getElementById("signal-incidents"),
+  signalIncidentsBar: document.getElementById("signal-incidents-bar"),
+  signalQueues: document.getElementById("signal-queues"),
+  signalQueuesBar: document.getElementById("signal-queues-bar"),
   cpuChartValue: document.getElementById("cpu-chart-value"),
   cpuChartDetail: document.getElementById("cpu-chart-detail"),
   cpuTrend: document.getElementById("cpu-trend"),
@@ -140,6 +150,29 @@ function setGauge({ fill, value, text }, percent = 0, detail = "") {
   }
   if (text) {
     text.textContent = detail;
+  }
+}
+
+function updateMicroBar(el, percent = 0) {
+  if (!el) return;
+  const safe = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 0;
+  el.style.setProperty("--fill", safe.toFixed(3));
+}
+
+function updateDial(percent = 0, detail = "") {
+  const safe = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+  if (els.dialValue) {
+    els.dialValue.textContent = `${safe.toFixed(1)}%`;
+  }
+  if (els.dialDetail) {
+    els.dialDetail.textContent = detail;
+  }
+  if (els.dialFill) {
+    els.dialFill.style.setProperty("--dial", safe);
+  }
+  if (els.dialNeedle) {
+    const rotation = -120 + (safe * 240) / 100;
+    els.dialNeedle.style.transform = `rotate(${rotation}deg)`;
   }
 }
 
@@ -331,14 +364,23 @@ async function loadClusterPods() {
 
     const notReady = nodes.not_ready ?? 0;
     const ready = nodes.ready ?? 0;
-    if (els.nodesDetail) {
-      els.nodesDetail.textContent = `${ready} ready / ${notReady} not-ready`;
+    const nodeTotal = ready + notReady;
+    const readyPercent = nodeTotal > 0 ? (ready / nodeTotal) * 100 : 0;
+    if (els.signalNodes) {
+      els.signalNodes.textContent = `${ready} ready / ${notReady} down`;
     }
+    updateMicroBar(els.signalNodesBar, readyPercent);
+
+    const saturationAvg =
+      ((Number(cpu.utilization_percent ?? 0) + Number(memory.utilization_percent ?? 0) +
+        Number(storage.utilization_percent ?? 0)) /
+        3) || 0;
+    if (els.signalSaturation) {
+      els.signalSaturation.textContent = `${saturationAvg.toFixed(1)}%`;
+    }
+    updateMicroBar(els.signalSaturationBar, saturationAvg);
 
     const severity = alerts.last_severity || "—";
-    if (els.lastSeverity) {
-      els.lastSeverity.textContent = severity === "—" ? "—" : severity.toString().toUpperCase();
-    }
 
     updateTrendCard(
       { value: els.cpuChartValue, detail: els.cpuChartDetail, trend: els.cpuTrend },
@@ -371,18 +413,43 @@ async function loadClusterPods() {
       Number(network.utilization_percent ?? throughputMbps),
     );
 
-    updateOverallHealth(podsSummary.unhealthy_percent ?? badPercent, severity);
-    if (els.alertIncidents) {
-      const incidents = alerts.open_incidents ?? 0;
-      els.alertIncidents.textContent = `Open incidents: ${incidents}`;
+    const pressureScore = Math.min(100, saturationAvg * 0.7 + (podsSummary.unhealthy_percent ?? badPercent) * 0.3);
+    const stabilityScore = Math.max(0, 100 - (podsSummary.unhealthy_percent ?? badPercent));
+    const dialNarrative =
+      pressureScore > 85
+        ? "Running hot"
+        : pressureScore > 65
+        ? "Heavy load, eyes on"
+        : pressureScore > 45
+        ? "Cruising"
+        : "Ready to accelerate";
+
+    updateDial(pressureScore, dialNarrative);
+    if (els.dialHistoryPressure) {
+      els.dialHistoryPressure.style.setProperty("--fill", Math.min(1, pressureScore / 100));
     }
-    if (els.alertQueues) {
-      const enabled = queues.enabled === true;
-      const totalBacklog = queues.total_backlog ?? 0;
-      els.alertQueues.textContent = enabled
-        ? `Queues backlog: ${totalBacklog}`
+    if (els.dialHistoryStability) {
+      els.dialHistoryStability.style.setProperty(
+        "--fill",
+        Math.max(0, Math.min(1, stabilityScore / 100)),
+      );
+    }
+
+    updateOverallHealth(podsSummary.unhealthy_percent ?? badPercent, severity);
+    const incidents = alerts.open_incidents ?? 0;
+    if (els.signalIncidents) {
+      els.signalIncidents.textContent = `${incidents} open`;
+    }
+    updateMicroBar(els.signalIncidentsBar, Math.min(100, incidents * 10));
+
+    const enabled = queues.enabled === true;
+    const totalBacklog = queues.total_backlog ?? 0;
+    if (els.signalQueues) {
+      els.signalQueues.textContent = enabled
+        ? `${totalBacklog} backlog`
         : "Queues disabled";
     }
+    updateMicroBar(els.signalQueuesBar, enabled ? Math.min(100, totalBacklog) : 0);
 
     if (els.podsTotalPill) {
       els.podsTotalPill.textContent = `${total} pods`;
