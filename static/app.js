@@ -40,6 +40,7 @@ const els = {
   podsTotalPill: document.getElementById("pods-total-pill"),
   errorBanner: document.getElementById("cluster-errors"),
   errorList: document.getElementById("error-list"),
+  reliabilityCard: document.getElementById("reliability-card"),
   nightStatusPill: document.getElementById("night-status-pill"),
   nightEventsLog: document.getElementById("night-events-log"),
   nightSummaryBox: document.getElementById("night-summary-box"),
@@ -458,6 +459,253 @@ class NetworkHistoryChart {
   }
 }
 
+class ReliabilityCharts {
+  constructor(container, { points = 36, intervalMinutes = 10, sloTarget = 99.5, threshold = 72 } = {}) {
+    this.container = container;
+    this.sliWrapper = container?.querySelector('[data-chart="sli"]');
+    this.burnWrapper = container?.querySelector('[data-chart="burn"]');
+    this.sliCanvas = this.sliWrapper?.querySelector("canvas");
+    this.burnCanvas = this.burnWrapper?.querySelector("canvas");
+    this.sliCtx = this.sliCanvas?.getContext("2d") || null;
+    this.burnCtx = this.burnCanvas?.getContext("2d") || null;
+    this.points = points;
+    this.intervalMs = intervalMinutes * 60 * 1000;
+    this.sloTarget = sloTarget;
+    this.threshold = threshold;
+    this.timestamps = [];
+    this.sliValues = [];
+    this.burnValues = [];
+    this.timer = null;
+    this.dpr = window.devicePixelRatio || 1;
+
+    if (!this.sliCanvas || !this.burnCanvas) return;
+
+    this.seedData();
+    this.resize();
+    this.draw();
+
+    const resizeObserver = new ResizeObserver(() => this.resize());
+    if (this.sliWrapper) resizeObserver.observe(this.sliWrapper);
+    if (this.burnWrapper) resizeObserver.observe(this.burnWrapper);
+
+    this.start();
+  }
+
+  seedData() {
+    const now = Date.now();
+    let lastSli = this.sloTarget + 0.1;
+    let lastBurn = 18 + Math.random() * 6;
+    for (let i = this.points - 1; i >= 0; i -= 1) {
+      const ts = new Date(now - i * this.intervalMs);
+      this.timestamps.push(ts);
+      lastSli = this.generateSliValue(lastSli);
+      lastBurn = this.generateBurnValue(lastBurn);
+      this.sliValues.push(lastSli);
+      this.burnValues.push(lastBurn);
+    }
+  }
+
+  generateSliValue(prev = this.sloTarget) {
+    const base = Number.isFinite(prev) ? prev : this.sloTarget;
+    const drift = (Math.random() - 0.5) * 0.35;
+    const dip = Math.random() < 0.14 ? -(0.3 + Math.random()) : 0;
+    const next = base + drift + dip;
+    return Math.min(100, Math.max(97, next));
+  }
+
+  generateBurnValue(prev = 12) {
+    const base = Number.isFinite(prev) ? prev : 12;
+    const drift = (Math.random() - 0.45) * 1.1;
+    const spike = Math.random() < 0.16 ? Math.random() * 6 : 0;
+    const next = base + drift + spike;
+    return Math.min(100, Math.max(0, next));
+  }
+
+  resizeCanvas(wrapper, canvas) {
+    if (!wrapper || !canvas) return;
+    const { width, height } = wrapper.getBoundingClientRect();
+    this.dpr = window.devicePixelRatio || 1;
+    canvas.width = width * this.dpr;
+    canvas.height = height * this.dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+  }
+
+  resize() {
+    this.resizeCanvas(this.sliWrapper, this.sliCanvas);
+    this.resizeCanvas(this.burnWrapper, this.burnCanvas);
+    this.draw();
+  }
+
+  formatTime(ts) {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    const hours = d.getHours().toString().padStart(2, "0");
+    const minutes = d.getMinutes().toString().padStart(2, "0");
+    return `${hours}:${minutes}`;
+  }
+
+  drawGrid(ctx, width, height, { min, max, padding = 12 }) {
+    const usableHeight = Math.max(10, height - padding * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    const steps = 4;
+    for (let i = 0; i <= steps; i += 1) {
+      const y = padding + (usableHeight / steps) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(width - padding, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(226,232,240,0.7)";
+    ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`${max.toFixed(1)}%`, padding, padding + 10);
+    ctx.textAlign = "right";
+    ctx.fillText(`${min.toFixed(1)}%`, width - padding, height - padding + 4);
+  }
+
+  drawLine(ctx, values, mapper, color, width = 2, dashed = false) {
+    if (!ctx || values.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    if (dashed) ctx.setLineDash([5, 6]);
+    values.forEach((value, idx) => {
+      const { x, y } = mapper(idx, value);
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    if (dashed) ctx.setLineDash([]);
+  }
+
+  drawSliChart() {
+    if (!this.sliCtx || !this.sliCanvas) return;
+    const ctx = this.sliCtx;
+    const width = this.sliCanvas.width / this.dpr;
+    const height = this.sliCanvas.height / this.dpr;
+    ctx.clearRect(0, 0, width, height);
+
+    const padding = 16;
+    const min = 97;
+    const max = 100;
+    const usableWidth = Math.max(10, width - padding * 2);
+    const usableHeight = Math.max(10, height - padding * 2);
+
+    this.drawGrid(ctx, width, height, { min, max, padding });
+
+    const valueToY = (val) => padding + usableHeight - ((val - min) / (max - min)) * usableHeight;
+    const indexToX = (idx) => padding + (idx / Math.max(1, this.sliValues.length - 1)) * usableWidth;
+
+    const sloY = valueToY(this.sloTarget);
+    ctx.strokeStyle = "rgba(251,191,36,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.setLineDash([4, 6]);
+    ctx.moveTo(padding, sloY);
+    ctx.lineTo(width - padding, sloY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    this.drawLine(
+      ctx,
+      this.sliValues,
+      (idx, val) => ({ x: indexToX(idx), y: valueToY(val) }),
+      "#67e8f9",
+      2.2,
+    );
+
+    ctx.fillStyle = "rgba(226,232,240,0.8)";
+    ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(this.formatTime(this.timestamps[0]), padding, height - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(this.formatTime(this.timestamps[this.timestamps.length - 1]), width - padding, height - 6);
+  }
+
+  drawBurnChart() {
+    if (!this.burnCtx || !this.burnCanvas) return;
+    const ctx = this.burnCtx;
+    const width = this.burnCanvas.width / this.dpr;
+    const height = this.burnCanvas.height / this.dpr;
+    ctx.clearRect(0, 0, width, height);
+
+    const padding = 16;
+    const min = 0;
+    const max = 100;
+    const usableWidth = Math.max(10, width - padding * 2);
+    const usableHeight = Math.max(10, height - padding * 2);
+
+    this.drawGrid(ctx, width, height, { min, max, padding });
+
+    const valueToY = (val) => padding + usableHeight - ((val - min) / (max - min)) * usableHeight;
+    const indexToX = (idx) => padding + (idx / Math.max(1, this.burnValues.length - 1)) * usableWidth;
+
+    const thresholdY = valueToY(this.threshold);
+    ctx.strokeStyle = "rgba(251,191,36,0.9)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.setLineDash([4, 6]);
+    ctx.moveTo(padding, thresholdY);
+    ctx.lineTo(width - padding, thresholdY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    this.drawLine(
+      ctx,
+      this.burnValues,
+      (idx, val) => ({ x: indexToX(idx), y: valueToY(val) }),
+      "#c084fc",
+      2.2,
+    );
+
+    ctx.fillStyle = "rgba(226,232,240,0.8)";
+    ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(this.formatTime(this.timestamps[0]), padding, height - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(this.formatTime(this.timestamps[this.timestamps.length - 1]), width - padding, height - 6);
+  }
+
+  draw() {
+    this.drawSliChart();
+    this.drawBurnChart();
+  }
+
+  appendPoint() {
+    const lastTime = this.timestamps[this.timestamps.length - 1] || new Date();
+    const nextTime = new Date(lastTime.getTime() + this.intervalMs);
+    const nextSli = this.generateSliValue(this.sliValues[this.sliValues.length - 1]);
+    const nextBurn = this.generateBurnValue(this.burnValues[this.burnValues.length - 1]);
+
+    this.timestamps.push(nextTime);
+    this.sliValues.push(nextSli);
+    this.burnValues.push(nextBurn);
+
+    if (this.timestamps.length > this.points) this.timestamps.shift();
+    if (this.sliValues.length > this.points) this.sliValues.shift();
+    if (this.burnValues.length > this.points) this.burnValues.shift();
+  }
+
+  start() {
+    this.stop();
+    this.timer = setInterval(() => {
+      this.appendPoint();
+      this.draw();
+    }, 45000);
+  }
+
+  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
 const gauges = {};
 const charts = {};
 const networkSimulator = new NetworkTrafficSimulator();
@@ -486,6 +734,16 @@ function initNetworkHistory() {
   charts.networkHistory.setData(seed);
   applyNetworkSample(seed[seed.length - 1]);
   startNetworkMockFeed();
+}
+
+function initReliabilityCharts() {
+  if (!els.reliabilityCard) return;
+  charts.reliability = new ReliabilityCharts(els.reliabilityCard, {
+    points: 36,
+    intervalMinutes: 10,
+    sloTarget: 99.5,
+    threshold: 75,
+  });
 }
 
 function updateNightStatus(isRunning) {
@@ -1672,6 +1930,7 @@ function startPolling() {
 window.addEventListener("DOMContentLoaded", () => {
   initGauges();
   initNetworkHistory();
+  initReliabilityCharts();
   setupPodsInfiniteScroll();
   loadClusterPods();
   loadNightStatus();
