@@ -52,7 +52,7 @@ const els = {
 };
 
 let currentSuggestionSession = null;
-const suggestionSessions = new Map();
+const discussionSessions = new Map();
 let allPods = [];
 let podsRendered = 0;
 const PAGE_SIZE = 50;
@@ -644,7 +644,53 @@ function handleAgentResponseFromSuggestion(data) {
   }
 }
 
-async function openSuggestionDiscussion(card, payload) {
+function buildDiscussionPayload(
+  card,
+  fallback = { title: "Discussion", reason: "", action: "", command: "" },
+) {
+  if (!card) return fallback;
+
+  if (card.classList.contains("suggestion-card")) {
+    const title = card.querySelector(".suggestion-title")?.innerText || "Suggestion";
+    const reason = card.querySelector(".suggestion-reason")?.innerText || "";
+    const actionText =
+      card.querySelector(".suggestion-action")?.innerText.replace(/^Action:\s*/i, "") || "";
+    const commandText = card.querySelector(".suggestion-command")?.innerText || "";
+    return {
+      title,
+      reason,
+      action: actionText,
+      command: commandText,
+    };
+  }
+
+  if (card.classList.contains("agent-step-card")) {
+    const title = card.querySelector(".entry-label")?.innerText || "SRE Step";
+    const reason = card.querySelector(".entry-title")?.innerText || card.dataset.command || "";
+    const actionText = card.querySelector(".agent-status")?.innerText || "";
+    const commandText = card.dataset.command || card.querySelector(".command-text")?.innerText || "";
+    return {
+      title,
+      reason,
+      action: actionText,
+      command: commandText,
+    };
+  }
+
+  if (card.classList.contains("final-entry")) {
+    const reason = card.querySelector(".final-answer-text")?.innerText || "";
+    return {
+      title: "Final Answer",
+      reason,
+      action: "Final outcome",
+      command: "",
+    };
+  }
+
+  return fallback;
+}
+
+function ensureDiscussionPanel(card) {
   let discussion = card.querySelector(".suggestion-discussion");
   if (!discussion) {
     discussion = document.createElement("div");
@@ -652,7 +698,7 @@ async function openSuggestionDiscussion(card, payload) {
     discussion.innerHTML = `
       <div class="suggestion-discussion-log"></div>
       <div class="suggestion-discussion-input">
-        <textarea placeholder="Ask about this suggestion…"></textarea>
+        <textarea placeholder="Ask about this item…"></textarea>
         <button class="suggestion-send-btn">Send</button>
       </div>
     `;
@@ -663,7 +709,26 @@ async function openSuggestionDiscussion(card, payload) {
   const textarea = discussion.querySelector("textarea");
   const sendBtn = discussion.querySelector(".suggestion-send-btn");
 
-  if (!suggestionSessions.has(card)) {
+  if (!discussion.dataset.bound && textarea && sendBtn) {
+    sendBtn.addEventListener("click", () => sendSuggestionMessage(card));
+    textarea.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        sendSuggestionMessage(card);
+      }
+    });
+    discussion.dataset.bound = "true";
+  }
+
+  if (textarea) textarea.focus();
+
+  return { discussion, logEl };
+}
+
+async function openSuggestionDiscussion(card, payload) {
+  const { logEl } = ensureDiscussionPanel(card);
+
+  if (!discussionSessions.has(card)) {
     try {
       const res = await fetch("/api/sre/suggestions/chat/start", {
         method: "POST",
@@ -671,31 +736,20 @@ async function openSuggestionDiscussion(card, payload) {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      suggestionSessions.set(card, data.session_id);
+      discussionSessions.set(card, data.session_id);
       appendSuggestionMessage(
         logEl,
         "assistant",
-        data.assistant || "Let’s discuss this suggestion.",
+        data.assistant || "Let’s discuss this item.",
       );
     } catch (err) {
       appendSuggestionMessage(
         logEl,
         "assistant",
-        "I couldn't start a discussion session for this suggestion.",
+        "I couldn't start a discussion session for this item.",
       );
       console.error("start suggestion chat failed", err);
     }
-  }
-
-  if (textarea) textarea.focus();
-  if (sendBtn && textarea) {
-    sendBtn.onclick = () => sendSuggestionMessage(card);
-    textarea.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && !ev.shiftKey) {
-        ev.preventDefault();
-        sendSuggestionMessage(card);
-      }
-    });
   }
 }
 
@@ -703,13 +757,13 @@ function appendSuggestionMessage(logEl, role, text) {
   if (!logEl) return;
   const div = document.createElement("div");
   div.className = role === "user" ? "msg-user" : "msg-assistant";
-  div.textContent = text;
+  div.innerHTML = `<span class="msg-label">${role === "user" ? "You" : "SRE"}</span> ${text}`;
   logEl.appendChild(div);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 async function sendSuggestionMessage(card) {
-  const sessionId = suggestionSessions.get(card);
+  const sessionId = discussionSessions.get(card);
   if (!sessionId) return;
   const discussion = card.querySelector(".suggestion-discussion");
   if (!discussion) return;
@@ -733,7 +787,7 @@ async function sendSuggestionMessage(card) {
     appendSuggestionMessage(
       logEl,
       "assistant",
-      "Error while replying about this suggestion.",
+      "Error while replying in this discussion.",
     );
     console.error("suggestion chat step failed", err);
   }
@@ -769,6 +823,9 @@ function appendFinalAnswer(answerText) {
   card.innerHTML = `
     <p class="entry-label">Final Answer</p>
     <p class="final-answer-text">${answerText || ""}</p>
+    <div class="discussion-trigger-row">
+      <button type="button" class="card-discuss-btn">Discuss</button>
+    </div>
   `;
   els.chatTimeline.appendChild(card);
   scrollTimeline();
@@ -889,6 +946,11 @@ function createAgentStepCard(data, options = {}) {
   card.appendChild(commandBlock);
   card.appendChild(output);
   card.appendChild(actions);
+
+  const discussRow = document.createElement("div");
+  discussRow.className = "discussion-trigger-row";
+  discussRow.innerHTML = `<button type="button" class="card-discuss-btn">Discuss</button>`;
+  card.appendChild(discussRow);
 
   els.chatTimeline.appendChild(card);
   scrollTimeline();
@@ -1125,6 +1187,14 @@ function setupChat() {
 
   if (els.chatTimeline) {
     els.chatTimeline.addEventListener("click", async (ev) => {
+      const discussBtn = ev.target.closest(".card-discuss-btn");
+      if (discussBtn) {
+        const card = ev.target.closest(".agent-step-card, .final-entry");
+        const payload = buildDiscussionPayload(card);
+        await openSuggestionDiscussion(card, payload);
+        return;
+      }
+
       const btn = ev.target.closest("button[data-agent-action]");
       if (!btn) return;
       const action = btn.dataset.agentAction;
