@@ -55,6 +55,31 @@ a {
   margin: 20px 28px 16px;
 }
 
+.cluster-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  grid-template-areas:
+    "left main"
+    "bottom bottom";
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.cluster-overview-left {
+  grid-area: left;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cluster-overview-main {
+  grid-area: main;
+}
+
+.cluster-overview-bottom {
+  grid-area: bottom;
+}
+
 .layout {
   display: grid;
   grid-template-columns: repeat(3, minmax(320px, 1fr));
@@ -179,68 +204,61 @@ a {
   color: var(--muted);
 }
 
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  grid-auto-rows: minmax(120px, auto);
-  gap: 12px;
-}
 
-.card.kpi-card {
+.card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px 16px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-.kpi-card-primary {
-  min-height: 130px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
-  border-color: rgba(56, 189, 248, 0.18);
+.mini-gauges,
+.dial-card,
+.signals-card {
+  gap: 12px;
+  padding: 14px 16px;
+  position: relative;
 }
 
-.kpi-header {
+.mini-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.mini-gauge:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.mini-gauge-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
 }
 
-.kpi-icon {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  border-radius: 10px;
-  font-size: 1.1rem;
-}
-
-.kpi-title .label {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  letter-spacing: 0.2px;
-}
-
-.kpi-card .value {
-  margin: 0;
-  font-size: 1.6rem;
-  font-weight: 700;
-}
-
-.kpi-card .subvalue {
+.mini-gauge .label {
   margin: 0;
   color: var(--muted);
   font-size: 0.95rem;
 }
 
-.kpi-bar {
+.mini-gauge .value {
+  margin: 0;
+  font-weight: 700;
+}
+
+.mini-gauge-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.gauge-bar {
   position: relative;
   width: 100%;
   height: 10px;
@@ -250,12 +268,294 @@ a {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.kpi-bar-fill {
+.gauge-fill {
   height: 100%;
   width: 0;
   background: var(--success);
   border-radius: 999px;
   transition: width 200ms ease, background 200ms ease;
+}
+
+.dial-card {
+  overflow: hidden;
+}
+
+.dial-gauge {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.dial-track,
+.dial-fill {
+  position: absolute;
+  inset: 10%;
+  border-radius: 50%;
+}
+
+.dial-track {
+  background: conic-gradient(from 210deg, rgba(15, 23, 42, 0.8), rgba(255, 255, 255, 0.05));
+  border: 2px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.35);
+}
+
+.dial-fill {
+  --dial: 0;
+  background: conic-gradient(from -120deg, #22c55e calc(var(--dial) * 1%), rgba(255, 255, 255, 0.04) 0%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 60%, black 61%);
+  transition: background 280ms ease;
+}
+
+.dial-needle {
+  position: absolute;
+  width: 4px;
+  height: 40%;
+  background: linear-gradient(180deg, #f8fafc 0%, #38bdf8 60%, #0ea5e9 100%);
+  transform-origin: 50% 80%;
+  transform: rotate(-120deg);
+  border-radius: 999px;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+  transition: transform 260ms ease-in-out;
+}
+
+.dial-center {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  background: radial-gradient(circle at 50% 40%, rgba(56, 189, 248, 0.18), rgba(15, 23, 42, 0.95));
+  padding: 18px 14px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.dial-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dial-value {
+  margin: 2px 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+.dial-subvalue {
+  margin: 0;
+  color: #bae6fd;
+  font-size: 0.95rem;
+}
+
+.dial-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.history-strip {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.history-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.history-fill {
+  --fill: 0;
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(var(--fill));
+  background: linear-gradient(90deg, #22c55e, #0ea5e9, #6366f1);
+  transition: transform 240ms ease, background 200ms ease;
+}
+
+.alert-pulse {
+  padding: 14px 16px;
+  gap: 10px;
+}
+
+.alert-body .label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.alert-body .value {
+  margin: 4px 0 6px;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.signals-card {
+  background: radial-gradient(circle at 20% 10%, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.92)), var(--card);
+}
+
+.signals-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.signal {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.signal-value {
+  margin: 2px 0 6px;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.micro-bar {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.micro-fill {
+  --fill: 0;
+  position: absolute;
+  inset: 0;
+  transform: scaleX(var(--fill));
+  transform-origin: left center;
+  background: linear-gradient(90deg, #22c55e, #38bdf8);
+  transition: transform 240ms ease, background 200ms ease;
+}
+
+.micro-fill.micro-warm {
+  background: linear-gradient(90deg, #f97316, #ef4444);
+}
+
+.micro-fill.micro-cool {
+  background: linear-gradient(90deg, #38bdf8, #6366f1);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.chart-card {
+  padding: 14px 16px;
+}
+
+.chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.chart-card-header h3 {
+  margin: 2px 0 0;
+}
+
+.chart-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chart-placeholder {
+  position: relative;
+  min-height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(14, 165, 233, 0.05));
+  overflow: hidden;
+}
+
+.chart-gridline {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 100% 40px, 60px 100%;
+  opacity: 0.12;
+}
+
+.sparkline {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(56, 189, 248, 0.35) 0%,
+    rgba(14, 165, 233, 0.22) 30%,
+    rgba(56, 189, 248, 0.16) 60%,
+    rgba(56, 189, 248, 0.08) 100%
+  );
+  mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+  opacity: 0.8;
+  transform-origin: center bottom;
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+.chart-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chart-value {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.chart-subvalue {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-align: right;
+}
+
+.bottom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .cluster-overview-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "left"
+      "main"
+      "bottom";
+  }
+
+  .chart-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .muted {
@@ -282,24 +582,6 @@ a {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
-}
-
-.gauge-bar {
-  position: relative;
-  width: 100%;
-  height: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.gauge-fill {
-  height: 100%;
-  width: 0;
-  background: var(--success);
-  border-radius: 999px;
-  transition: width 200ms ease, background 200ms ease;
 }
 
 .gauge-footer {
