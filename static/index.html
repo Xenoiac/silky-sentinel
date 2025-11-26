@@ -171,26 +171,29 @@
             <p class="eyebrow">Reliability</p>
             <h3>Reliability (SLI / SLO / Error Budget)</h3>
           </div>
-          <span class="pill soft">Mock data</span>
         </div>
 
         <div class="reliability-charts">
           <div class="reliability-chart" data-chart="sli">
-            <div class="chart-label">SLI vs SLO</div>
-            <canvas></canvas>
-            <div class="chart-legend">
-              <span class="legend-item legend-sli"><span class="legend-dot"></span>SLI</span>
-              <span class="legend-item legend-slo"><span class="legend-dot"></span>SLO 99.5%</span>
+            <div class="chart-header-row">
+              <div class="chart-title">SLI vs SLO</div>
+              <div class="chart-legend">
+                <span class="legend-item legend-sli"><span class="legend-dot"></span>SLI</span>
+                <span class="legend-item legend-slo"><span class="legend-dot"></span>SLO</span>
+              </div>
             </div>
+            <canvas></canvas>
           </div>
 
           <div class="reliability-chart" data-chart="burn">
-            <div class="chart-label">Error budget burn</div>
-            <canvas></canvas>
-            <div class="chart-legend">
-              <span class="legend-item legend-burn"><span class="legend-dot"></span>Burn rate</span>
-              <span class="legend-item legend-threshold"><span class="legend-dot"></span>Max acceptable</span>
+            <div class="chart-header-row">
+              <div class="chart-title">Error budget burn</div>
+              <div class="chart-legend">
+                <span class="legend-item legend-burn"><span class="legend-dot"></span>Burn rate</span>
+                <span class="legend-item legend-threshold"><span class="legend-dot"></span>Threshold</span>
+              </div>
             </div>
+            <canvas></canvas>
           </div>
         </div>
       </article>

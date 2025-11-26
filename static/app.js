@@ -716,7 +716,7 @@ class ReliabilityCharts {
     return `${hours}:${minutes}`;
   }
 
-  drawGrid(ctx, width, height, { min, max, padding = 12 }) {
+  drawGrid(ctx, width, height, { min, max, padding = 10 }) {
     const usableHeight = Math.max(10, height - padding * 2);
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
@@ -761,7 +761,7 @@ class ReliabilityCharts {
     const height = this.sliCanvas.height / this.dpr;
     ctx.clearRect(0, 0, width, height);
 
-    const padding = 16;
+    const padding = 12;
     const min = 97;
     const max = 100;
     const usableWidth = Math.max(10, width - padding * 2);
@@ -805,7 +805,7 @@ class ReliabilityCharts {
     const height = this.burnCanvas.height / this.dpr;
     ctx.clearRect(0, 0, width, height);
 
-    const padding = 16;
+    const padding = 12;
     const min = 0;
     const max = 100;
     const usableWidth = Math.max(10, width - padding * 2);
