@@ -195,13 +195,14 @@ a {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .kpi-card-primary {
   min-height: 178px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
   border-color: rgba(56, 189, 248, 0.18);
+  padding-bottom: 14px;
 }
 
 .kpi-header {
@@ -241,11 +242,20 @@ a {
   font-size: 0.93rem;
 }
 
+.kpi-card-primary .value {
+  margin-top: -6px;
+}
+
+.kpi-card-primary .subvalue {
+  margin-top: -6px;
+  padding-top: 2px;
+}
+
 .gauge-holder {
   position: relative;
-  height: 124px;
+  height: 138px;
   width: 100%;
-  margin-top: -2px;
+  margin-top: -4px;
 }
 
 .gauge-shell {
@@ -281,23 +291,6 @@ a {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.88rem;
-}
-
-#card-network .gauge-holder {
-  height: 120px;
-  margin-bottom: 0;
-}
-
-.network-history-chart {
-  height: 58px;
-  width: 100%;
-  margin-top: -2px;
-}
-
-.network-history-chart canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 .reliability-card {
