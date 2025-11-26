@@ -125,6 +125,46 @@
         <ul id="error-list"></ul>
       </div>
 
+      <section id="sre-metrics-timeseries">
+        <div class="timeseries-grid">
+          <article class="card timeseries-card" id="cpu-timeseries-card">
+            <header class="timeseries-card-header">
+              <div>
+                <p class="eyebrow">CPU Usage</p>
+                <h3>CPU Usage (last 1h)</h3>
+              </div>
+            </header>
+            <div class="timeseries-chart" data-chart="cpu" id="cpu-timeseries-chart">
+              <canvas id="cpu-timeseries"></canvas>
+            </div>
+          </article>
+
+          <article class="card timeseries-card" id="memory-timeseries-card">
+            <header class="timeseries-card-header">
+              <div>
+                <p class="eyebrow">Memory Usage</p>
+                <h3>Memory Usage (last 1h)</h3>
+              </div>
+            </header>
+            <div class="timeseries-chart" data-chart="memory" id="memory-timeseries-chart">
+              <canvas id="memory-timeseries"></canvas>
+            </div>
+          </article>
+
+          <article class="card timeseries-card" id="network-timeseries-card">
+            <header class="timeseries-card-header">
+              <div>
+                <p class="eyebrow">Network Traffic</p>
+                <h3>Network Traffic (last 1h)</h3>
+              </div>
+            </header>
+            <div class="timeseries-chart" data-chart="network" id="network-timeseries-chart">
+              <canvas id="network-timeseries"></canvas>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <article class="card reliability-card" id="reliability-card">
         <div class="reliability-card-header">
           <div>

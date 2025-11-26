@@ -455,6 +455,182 @@ class NetworkHistoryChart {
   }
 }
 
+class SimpleTimeseriesChart {
+  constructor(
+    wrapper,
+    {
+      seriesConfigs = [],
+      points = 13,
+      intervalMinutes = 5,
+      yUnit = "",
+      clampMax = null,
+    } = {},
+  ) {
+    this.wrapper = wrapper;
+    this.canvas = wrapper?.querySelector("canvas") || null;
+    this.ctx = this.canvas?.getContext("2d") || null;
+    this.seriesConfigs = seriesConfigs.map((cfg) => ({ ...cfg, values: [] }));
+    this.points = points;
+    this.intervalMs = intervalMinutes * 60 * 1000;
+    this.yUnit = yUnit;
+    this.clampMax = clampMax;
+    this.timestamps = [];
+    this.dpr = window.devicePixelRatio || 1;
+
+    if (!this.canvas || !this.ctx || !this.wrapper) return;
+
+    this.seedData();
+    this.resize();
+
+    const resizeObserver = new ResizeObserver(() => this.resize());
+    resizeObserver.observe(this.wrapper);
+  }
+
+  seedData() {
+    const now = Date.now();
+    for (let i = this.points - 1; i >= 0; i -= 1) {
+      const ts = new Date(now - i * this.intervalMs);
+      this.timestamps.push(ts);
+      this.seriesConfigs.forEach((cfg) => {
+        const prev = cfg.values[cfg.values.length - 1];
+        const next = this.generateValue(cfg, prev);
+        cfg.values.push(next);
+      });
+    }
+  }
+
+  generateValue(cfg = {}, prev = null) {
+    const base = Number.isFinite(cfg.base) ? cfg.base : Number.isFinite(prev) ? prev : 50;
+    const variance = Number.isFinite(cfg.variance) ? cfg.variance : 4;
+    const min = Number.isFinite(cfg.min) ? cfg.min : 0;
+    const max = Number.isFinite(cfg.max) ? cfg.max : 100;
+    const spikeChance = Number.isFinite(cfg.spikeChance) ? cfg.spikeChance : 0.08;
+    const spikeScale = Number.isFinite(cfg.spikeScale) ? cfg.spikeScale : 0.18;
+
+    const drift = (Number.isFinite(prev) ? prev : base) * 0.62 + base * 0.38;
+    let next = drift + (Math.random() - 0.5) * variance;
+    if (Math.random() < spikeChance) {
+      next += Math.abs(base) * (spikeScale + Math.random() * spikeScale);
+    }
+    return Math.max(min, Math.min(max, next));
+  }
+
+  resize() {
+    if (!this.canvas || !this.ctx || !this.wrapper) return;
+    const { width, height: containerHeight } = this.wrapper.getBoundingClientRect();
+    const targetHeight = containerHeight || width * 0.45;
+    const height = Math.max(120, Math.min(220, targetHeight));
+    this.dpr = window.devicePixelRatio || 1;
+    this.canvas.width = width * this.dpr;
+    this.canvas.height = height * this.dpr;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.draw();
+  }
+
+  appendPoint(values = {}) {
+    if (!this.canvas || !this.ctx) return;
+    const ts = new Date();
+    this.timestamps.push(ts);
+    this.seriesConfigs.forEach((cfg) => {
+      const incoming = Number(values?.[cfg.key]);
+      const prev = cfg.values[cfg.values.length - 1];
+      const next = Number.isFinite(incoming) ? incoming : this.generateValue(cfg, prev);
+      cfg.values.push(next);
+      if (cfg.values.length > this.points) cfg.values.shift();
+    });
+    if (this.timestamps.length > this.points) this.timestamps.shift();
+    this.draw();
+  }
+
+  draw() {
+    if (!this.canvas || !this.ctx) return;
+    const ctx = this.ctx;
+    const width = this.canvas.width / this.dpr;
+    const height = this.canvas.height / this.dpr;
+    ctx.clearRect(0, 0, width, height);
+
+    const padding = 14;
+    const usableWidth = Math.max(12, width - padding * 2);
+    const usableHeight = Math.max(24, height - padding * 2);
+    const allValues = this.seriesConfigs.flatMap((cfg) => cfg.values);
+    const maxVal = Math.max(Math.max(...allValues, 1), 1);
+    const targetMax = this.clampMax ? Math.min(this.clampMax, Math.max(maxVal, this.clampMax * 0.65)) : maxVal;
+    const paddedMax = targetMax * 1.1;
+
+    const valueToY = (val) => padding + usableHeight - (val / paddedMax) * usableHeight;
+    const indexToX = (idx, total) => padding + (total <= 1 ? usableWidth : (idx / (total - 1)) * usableWidth);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    const gridLines = 3;
+    for (let i = 0; i <= gridLines; i += 1) {
+      const y = padding + (usableHeight / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(width - padding, y);
+      ctx.stroke();
+    }
+
+    const totalPoints = this.timestamps.length;
+    const pointMapper = (idx, val) => ({ x: indexToX(idx, totalPoints), y: valueToY(val) });
+
+    this.seriesConfigs.forEach((cfg) => {
+      if (!cfg.values || cfg.values.length < 2) return;
+      ctx.beginPath();
+      ctx.strokeStyle = cfg.color || "#38bdf8";
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      cfg.values.forEach((val, idx) => {
+        const { x, y } = pointMapper(idx, val);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+
+    ctx.fillStyle = "rgba(226,232,240,0.8)";
+    ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(paddedMax)}${this.yUnit}`, width - padding + 4, padding + 6);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(148,163,184,0.9)";
+    if (totalPoints > 1) {
+      ctx.fillText(this.formatTime(this.timestamps[0]), padding, height - 8);
+      ctx.textAlign = "right";
+      ctx.fillText(this.formatTime(this.timestamps[totalPoints - 1]), width - padding, height - 8);
+    }
+
+    if (this.seriesConfigs.length > 1) {
+      ctx.textAlign = "left";
+      this.drawLegend(ctx);
+    }
+  }
+
+  drawLegend(ctx) {
+    let x = 12;
+    const y = 16;
+    this.seriesConfigs.forEach((cfg, idx) => {
+      ctx.fillStyle = cfg.color || "#38bdf8";
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(226,232,240,0.8)";
+      ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(cfg.label || `S${idx + 1}`, x + 7, y + 3.5);
+      x += 7 + ctx.measureText(cfg.label || `S${idx + 1}`).width + 16;
+    });
+  }
+
+  formatTime(date = new Date()) {
+    return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(date);
+  }
+}
+
 class ReliabilityCharts {
   constructor(container, { points = 36, intervalMinutes = 10, sloTarget = 99.5, threshold = 72 } = {}) {
     this.container = container;
@@ -723,6 +899,45 @@ function initReliabilityCharts() {
   });
 }
 
+function initTimeseriesCharts() {
+  charts.timeseries = charts.timeseries || {};
+
+  const cpuWrapper = document.getElementById("cpu-timeseries-chart");
+  const memWrapper = document.getElementById("memory-timeseries-chart");
+  const netWrapper = document.getElementById("network-timeseries-chart");
+
+  if (cpuWrapper) {
+    charts.timeseries.cpu = new SimpleTimeseriesChart(cpuWrapper, {
+      seriesConfigs: [
+        { key: "cpu", label: "CPU", color: "#38bdf8", base: 58, variance: 5.5, min: 10, max: 98 },
+      ],
+      yUnit: "%",
+      clampMax: 100,
+    });
+  }
+
+  if (memWrapper) {
+    charts.timeseries.memory = new SimpleTimeseriesChart(memWrapper, {
+      seriesConfigs: [
+        { key: "memory", label: "Memory", color: "#f59e0b", base: 62, variance: 6, min: 15, max: 98 },
+      ],
+      yUnit: "%",
+      clampMax: 100,
+    });
+  }
+
+  if (netWrapper) {
+    charts.timeseries.network = new SimpleTimeseriesChart(netWrapper, {
+      seriesConfigs: [
+        { key: "rx", label: "RX", color: "#38bdf8", base: 32, variance: 6, min: 4, max: 150, spikeChance: 0.12 },
+        { key: "tx", label: "TX", color: "#a78bfa", base: 28, variance: 5, min: 4, max: 150, spikeChance: 0.1 },
+      ],
+      yUnit: " Mbps",
+      clampMax: 160,
+    });
+  }
+}
+
 function updateNightStatus(isRunning) {
   const pill = els.nightStatusPill;
   if (!pill) return;
@@ -906,6 +1121,10 @@ async function loadClusterPods() {
     gauges.memory?.setValue(memoryPercent);
     gauges.storage?.setValue(storagePercent);
     applyNetworkSample(networkSample);
+
+    charts.timeseries?.cpu?.appendPoint({ cpu: cpuPercent });
+    charts.timeseries?.memory?.appendPoint({ memory: memoryPercent });
+    charts.timeseries?.network?.appendPoint({ rx: networkSample.rx, tx: networkSample.tx });
 
     if (els.cpuPercent) {
       els.cpuPercent.textContent = `${cpuPercent.toFixed(1)}%`;
@@ -1898,6 +2117,7 @@ function startPolling() {
 
 window.addEventListener("DOMContentLoaded", () => {
   initGauges();
+  initTimeseriesCharts();
   initReliabilityCharts();
   setupPodsInfiniteScroll();
   loadClusterPods();
