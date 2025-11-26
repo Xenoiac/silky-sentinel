@@ -200,9 +200,9 @@ class Gauge {
     ctx.lineCap = "round";
 
     const segments = [
-      { start: 0, end: 70, color: "#22c55e" },
-      { start: 70, end: 85, color: "#f59e0b" },
-      { start: 85, end: 100, color: "#ef4444" },
+      { start: 0, end: 70, color: "#22c55e" }, // healthy
+      { start: 70, end: 90, color: "#f59e0b" }, // elevated
+      { start: 90, end: 100, color: "#ef4444" }, // critical
     ];
 
     ctx.beginPath();
@@ -782,13 +782,18 @@ class ReliabilityCharts {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Bright, thicker SLI line with a subtle glow so it stays visible
+    ctx.save();
+    ctx.shadowColor = "rgba(74,222,128,0.6)";
+    ctx.shadowBlur = 8;
     this.drawLine(
       ctx,
       this.sliValues,
       (idx, val) => ({ x: indexToX(idx), y: valueToY(val) }),
-      "#22c55e",
-      2.4,
+      "#4ade80",
+      3,
     );
+    ctx.restore();
 
     ctx.fillStyle = "rgba(226,232,240,0.8)";
     ctx.font = "10px 'Inter', system-ui, -apple-system, sans-serif";
@@ -1154,19 +1159,29 @@ async function loadClusterPods() {
       els.podsPercent.textContent = `${podPercent.toFixed(1)}%`;
     }
     if (els.podsDetail) {
-      els.podsDetail.textContent = `${bad} unhealthy of ${total} pods`;
+      if (total === 0) {
+        els.podsDetail.textContent = "No pods reported";
+      } else {
+        els.podsDetail.textContent = `${bad} unhealthy of ${total} pods`;
+      }
     }
 
     const notReady = nodes.not_ready ?? 0;
     const ready = nodes.ready ?? 0;
-    const nodeTotal = nodes.count ?? ready + notReady;
-    const notReadyPercent = nodeTotal > 0 ? (notReady / nodeTotal) * 100 : 0;
-    setProgressBar(els.nodesFill, notReadyPercent);
+    const rawCount = Number(nodes.count ?? 0);
+    const nodeTotal = rawCount > 0 ? rawCount : ready + notReady;
+    const readyPercent = nodeTotal > 0 ? (ready / nodeTotal) * 100 : 0;
+
+    setProgressBar(els.nodesFill, readyPercent);
     if (els.nodesPercent) {
-      els.nodesPercent.textContent = `${notReadyPercent.toFixed(1)}%`;
+      els.nodesPercent.textContent = `${readyPercent.toFixed(1)}%`;
     }
     if (els.nodesDetail) {
-      els.nodesDetail.textContent = `${ready} ready / ${notReady} not-ready`;
+      if (nodeTotal === 0) {
+        els.nodesDetail.textContent = "No nodes reported";
+      } else {
+        els.nodesDetail.textContent = `${ready} ready / ${notReady} not-ready`;
+      }
     }
 
     const severity = alerts.last_severity || "—";
