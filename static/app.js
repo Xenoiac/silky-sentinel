@@ -10,22 +10,17 @@ const els = {
   podsTableBody: document.getElementById("pods-table-body"),
   podsTableContainer: document.getElementById("pods-table-container"),
   cpuPercent: document.getElementById("cpu-util"),
-  cpuFill: document.getElementById("cpu-bar-fill"),
   cpuDetail: document.getElementById("cpu-cores"),
   cpuGauge: document.getElementById("cpu-gauge"),
   memoryPercent: document.getElementById("memory-util"),
-  memoryFill: document.getElementById("memory-bar-fill"),
   memoryDetail: document.getElementById("memory-usage"),
   memoryGauge: document.getElementById("memory-gauge"),
   storagePercent: document.getElementById("storage-util"),
-  storageFill: document.getElementById("storage-bar-fill"),
   storageDetail: document.getElementById("storage-usage"),
   storageGauge: document.getElementById("storage-gauge"),
   networkPercent: document.getElementById("network-util"),
-  networkFill: document.getElementById("network-bar-fill"),
   networkDetail: document.getElementById("network-usage"),
   networkGauge: document.getElementById("network-gauge"),
-  networkHistoryChart: document.getElementById("network-history-chart"),
   podsPercent: document.getElementById("pods-percent"),
   podsFill: document.getElementById("pods-bar-fill"),
   podsDetail: document.getElementById("pods-detail"),
@@ -718,25 +713,6 @@ function initGauges() {
   gauges.network = new Gauge(els.networkGauge, { label: "Network", initial: 0 });
 }
 
-let networkMockTimer = null;
-
-function startNetworkMockFeed() {
-  if (networkMockTimer) clearInterval(networkMockTimer);
-  networkMockTimer = setInterval(() => {
-    const sample = networkSimulator.nextSample();
-    applyNetworkSample(sample);
-  }, 5000);
-}
-
-function initNetworkHistory() {
-  if (!els.networkHistoryChart) return;
-  charts.networkHistory = new NetworkHistoryChart(els.networkHistoryChart, { capacity: 60 });
-  const seed = networkSimulator.seed(40);
-  charts.networkHistory.setData(seed);
-  applyNetworkSample(seed[seed.length - 1]);
-  startNetworkMockFeed();
-}
-
 function initReliabilityCharts() {
   if (!els.reliabilityCard) return;
   charts.reliability = new ReliabilityCharts(els.reliabilityCard, {
@@ -887,11 +863,6 @@ function applyNetworkSample(sample = {}) {
       els.networkDetail.textContent = "Live traffic";
     }
   }
-  setProgressBar(els.networkFill, percent);
-
-  if (charts.networkHistory && Number.isFinite(rx) && Number.isFinite(tx)) {
-    charts.networkHistory.addSample({ rx, tx });
-  }
 }
 
 function buildNetworkSample(networkData = {}) {
@@ -942,21 +913,18 @@ async function loadClusterPods() {
     if (els.cpuDetail) {
       els.cpuDetail.textContent = `${(cpu.used_cores ?? 0).toFixed(2)} / ${(cpu.total_cores ?? 0).toFixed(2)} cores`;
     }
-    setProgressBar(els.cpuFill, cpuPercent);
     if (els.memoryPercent) {
       els.memoryPercent.textContent = `${memoryPercent.toFixed(1)}%`;
     }
     if (els.memoryDetail) {
       els.memoryDetail.textContent = `${(memory.used_gib ?? 0).toFixed(2)} / ${(memory.total_gib ?? 0).toFixed(2)} GiB`;
     }
-    setProgressBar(els.memoryFill, memoryPercent);
     if (els.storagePercent) {
       els.storagePercent.textContent = `${storagePercent.toFixed(1)}%`;
     }
     if (els.storageDetail) {
       els.storageDetail.textContent = `${(storage.used_gib ?? 0).toFixed(2)} / ${(storage.total_gib ?? 0).toFixed(2)} GiB`;
     }
-    setProgressBar(els.storageFill, storagePercent);
 
     const total = podsSummary.total ?? pods.length;
     const bad = podsSummary.unhealthy ?? 0;
@@ -1930,7 +1898,6 @@ function startPolling() {
 
 window.addEventListener("DOMContentLoaded", () => {
   initGauges();
-  initNetworkHistory();
   initReliabilityCharts();
   setupPodsInfiniteScroll();
   loadClusterPods();
