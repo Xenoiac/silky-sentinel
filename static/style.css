@@ -179,36 +179,36 @@ a {
   color: var(--muted);
 }
 
+#sre-metrics-timeseries {
+  margin: 16px 0 14px;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  grid-auto-rows: minmax(120px, auto);
-  gap: 14px;
-  align-items: start;
-}
-
-#sre-metrics-timeseries {
-  margin: 6px 0 2px;
+  grid-auto-rows: minmax(180px, 1fr);
+  gap: 12px;
+  align-items: stretch;
 }
 
 .namespaces-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
+  gap: 12px;
   align-items: stretch;
-  margin-top: 6px;
+  margin-top: 14px;
 }
 
 .namespace-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 240px;
+  min-height: 220px;
 }
 
 .namespace-card .mini-panel-header {
@@ -224,19 +224,22 @@ a {
 .timeseries-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
+  gap: 12px;
+  grid-auto-rows: minmax(220px, 1fr);
+  align-items: stretch;
 }
 
 .timeseries-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 210px;
+  min-height: 0;
+  height: 100%;
 }
 
 .timeseries-card-header h3 {
@@ -250,7 +253,7 @@ a {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px 6px;
-  height: 170px;
+  height: 150px;
   overflow: hidden;
 }
 
@@ -275,18 +278,19 @@ a {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: 100%;
+  min-height: 0;
 }
 
 .kpi-card-primary {
-  min-height: 178px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.8);
   border-color: rgba(56, 189, 248, 0.18);
-  padding-bottom: 14px;
+  padding-bottom: 12px;
 }
 
 .kpi-header {
@@ -337,7 +341,7 @@ a {
 
 .gauge-holder {
   position: relative;
-  height: 138px;
+  height: 118px;
   width: 100%;
   margin-top: -4px;
 }
@@ -411,7 +415,7 @@ a {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px 6px;
-  height: 110px;
+  height: 100px;
   overflow: hidden;
 }
 
