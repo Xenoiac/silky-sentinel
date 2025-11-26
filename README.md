@@ -40,6 +40,11 @@ Silky Sentinel is a lightweight SRE copilot for Kubernetes clusters. It can chat
    ```
    The default UI lives in `static/index.html`, and REST endpoints are namespaced under `/api` (for example, `/api/cluster/pods` and `/api/night/status`).
 
+## Configuring the LLM provider
+- **OpenAI (default)**: set `LLM_PROVIDER=openai` and provide `OPENAI_API_KEY`. The app will use `LLM_MODEL` for all calls.
+- **Ollama**: set `LLM_PROVIDER=ollama`, point `LLM_API_BASE` to your Ollama endpoint (default `https://ollama.silky.systems`), and set `LLM_MODEL` to the local model name (e.g., `llama3.1`).
+If `LLM_PROVIDER` is unrecognized, the app logs an error and falls back to the OpenAI settings when available.
+
 ## Testing
 Run the unit suite with:
 ```bash
