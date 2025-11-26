@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from typing import TypedDict, List, Dict, Any, Optional
+from types import SimpleNamespace
 
 # --------------------------------------------------------------------
 # Load .env from the same directory as this script
@@ -30,6 +31,8 @@ KUBECONFIG = os.getenv("KUBECONFIG")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+LLM_API_BASE = os.getenv("LLM_API_BASE", "https://ollama.silky.systems")
 
 # Mode & night-mode config
 SILKY_MODE = os.getenv("SILKY_MODE", "chat")
@@ -39,14 +42,74 @@ REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 AUDIT_LOG_PATH = Path(__file__).resolve().parent / "audit.log"
 
 # --------------------------------------------------------------------
-# OpenAI Client
+# LLM Clients
 # --------------------------------------------------------------------
-client = None
-if OPENAI_API_KEY != "DUMMY_KEY_FOR_MOCK_DEMO":
+
+
+class OllamaResponses:
+    def __init__(self, api_base: str, default_model: str):
+        self.api_base = api_base.rstrip("/")
+        self.default_model = default_model
+
+    def _messages_to_prompt(self, messages: Any) -> str:
+        if isinstance(messages, str):
+            return messages
+        if isinstance(messages, list):
+            parts = []
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    parts.append(f"{role.upper()}: {content}")
+                else:
+                    parts.append(str(msg))
+            return "\n\n".join(parts)
+        return str(messages)
+
+    def create(self, model: str, input: Any):
+        prompt = self._messages_to_prompt(input)
+        payload = {"model": model or self.default_model, "prompt": prompt, "stream": False}
+        response = requests.post(f"{self.api_base}/api/generate", json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json() if hasattr(response, "json") else {}
+        output = data.get("response") or data.get("message") or ""
+        return SimpleNamespace(output_text=str(output), raw=data)
+
+
+class OllamaClient:
+    def __init__(self, api_base: str, default_model: str):
+        self.responses = OllamaResponses(api_base, default_model)
+
+
+def _init_openai_client(allow_missing: bool = False):
+    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
+        return None
+
     if not OPENAI_API_KEY:
-        print("Error: OPENAI_API_KEY not found or invalid. Please update your .env file.")
+        msg = "Error: OPENAI_API_KEY not found or invalid. Please update your .env file."
+        if allow_missing:
+            print(msg)
+            return None
+        print(msg)
         sys.exit(1)
-    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    return OpenAI(api_key=OPENAI_API_KEY)
+
+
+def _init_llm_client():
+    provider = (LLM_PROVIDER or "openai").lower()
+    if provider == "openai":
+        return _init_openai_client()
+    if provider == "ollama":
+        return OllamaClient(api_base=LLM_API_BASE, default_model=LLM_MODEL)
+
+    print(
+        f"Error: Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Falling back to OpenAI configuration if available."
+    )
+    return _init_openai_client(allow_missing=True)
+
+
+client = _init_llm_client()
 
 
 # --------------------------------------------------------------------
@@ -59,7 +122,7 @@ def get_llm_client():
 
 
 def extract_text_from_responses(response: Any) -> str:
-    """Safely extract text content from an OpenAI response object."""
+    """Safely extract text content from an LLM response object."""
 
     if response is None:
         return ""
