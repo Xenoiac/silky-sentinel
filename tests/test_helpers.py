@@ -72,6 +72,7 @@ Exception another issue
 
 def test_is_ollama_backend_detects_base_url(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://ollama.example.com")
+    monkeypatch.setattr(silky_sentinel, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
 
     assert silky_sentinel.is_ollama_backend() is True
@@ -79,6 +80,7 @@ def test_is_ollama_backend_detects_base_url(monkeypatch):
 
 def test_is_ollama_backend_detects_qwen(monkeypatch):
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setattr(silky_sentinel, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "qwen3:32b")
 
     assert silky_sentinel.is_ollama_backend() is True
@@ -86,6 +88,7 @@ def test_is_ollama_backend_detects_qwen(monkeypatch):
 
 def test_is_ollama_backend_openai(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setattr(silky_sentinel, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
 
     assert silky_sentinel.is_ollama_backend() is False
@@ -93,6 +96,7 @@ def test_is_ollama_backend_openai(monkeypatch):
 
 def test_prepare_json_strict_passthrough(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setattr(silky_sentinel, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
 
     clean_text = "not json"

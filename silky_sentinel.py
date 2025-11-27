@@ -31,17 +31,25 @@ KUBECONFIG = os.getenv("KUBECONFIG")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-LLM_API_BASE = os.getenv("LLM_API_BASE", "https://ollama.silky.systems")
-LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
+LLM_API_BASE = os.getenv("LLM_API_BASE", "http://localhost:11434")
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
 
 
 # OpenAI/ChatGPT uses strict JSON parsing, but some Ollama/Qwen models add prose around
 # JSON payloads. This helper identifies when the backend is Ollama so downstream logic can
 # relax parsing rules.
 def is_ollama_backend() -> bool:
+    provider = (LLM_PROVIDER or "").lower()
+    if provider == "ollama":
+        return True
+
     base_url = os.getenv("OPENAI_BASE_URL", "")
     if "ollama" in base_url.lower():
+        return True
+
+    api_base = (LLM_API_BASE or "")
+    if "ollama" in api_base.lower():
         return True
 
     if not base_url:
@@ -1677,6 +1685,17 @@ def night_analyze_with_llm(snapshot: dict) -> dict:
 
         json_payload = _prepare_json_for_loading(raw)
         return json.loads(json_payload)
+    except json.JSONDecodeError as e:
+        return {
+            "severity": "unknown",
+            "title": "Failed to parse LLM output",
+            "summary": (f"Error during LLM analysis: {e}"),
+            "notable_pods": [],
+            "recommendations": [
+                "Verify the model returned valid JSON without extra prose.",
+                "Consider increasing LLM_TIMEOUT_SECONDS if timeouts persist.",
+            ],
+        }
     except Exception as e:
         return {
             "severity": "unknown",
