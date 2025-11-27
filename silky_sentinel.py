@@ -30,9 +30,10 @@ SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 KUBECONFIG = os.getenv("KUBECONFIG")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
-LLM_API_BASE = os.getenv("LLM_API_BASE", "http://localhost:11434")
+LLM_API_BASE = (os.getenv("LLM_API_BASE") or "http://localhost:11434").rstrip("/")
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
 
 
@@ -44,18 +45,17 @@ def is_ollama_backend() -> bool:
     if provider == "ollama":
         return True
 
-    base_url = os.getenv("OPENAI_BASE_URL", "")
+    base_url = os.getenv("OPENAI_BASE_URL", OPENAI_BASE_URL)
     if "ollama" in base_url.lower():
         return True
 
-    api_base = (LLM_API_BASE or "")
+    api_base = os.getenv("LLM_API_BASE", LLM_API_BASE)
     if "ollama" in api_base.lower():
         return True
 
-    if not base_url:
-        model_name = (LLM_MODEL or "").lower()
-        if model_name.startswith("qwen"):
-            return True
+    model_name = (LLM_MODEL or "").lower()
+    if model_name.startswith("qwen"):
+        return True
 
     return False
 
@@ -108,6 +108,38 @@ class OllamaClient:
         self.responses = OllamaResponses(api_base, default_model)
 
 
+class OpenAIChatResponses:
+    def __init__(self, client: OpenAI, default_model: str):
+        self.client = client
+        self.default_model = default_model
+
+    def _normalize_messages(self, input: Any) -> List[Dict[str, str]]:
+        if isinstance(input, list):
+            return input
+        if isinstance(input, dict):
+            return [input]  # type: ignore[list-item]
+        return [{"role": "user", "content": str(input)}]
+
+    def create(self, model: str, input: Any):
+        messages = self._normalize_messages(input)
+        completion = self.client.chat.completions.create(
+            model=model or self.default_model,
+            messages=messages,
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
+        try:
+            content = completion.choices[0].message.content or ""
+        except Exception:
+            content = ""
+        return SimpleNamespace(output_text=str(content), raw=completion)
+
+
+class OpenAIChatClient:
+    def __init__(self, api_key: str, base_url: str, default_model: str):
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.responses = OpenAIChatResponses(self.client, default_model)
+
+
 def _init_openai_client(allow_missing: bool = False):
     if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
         return None
@@ -120,20 +152,21 @@ def _init_openai_client(allow_missing: bool = False):
         print(msg)
         sys.exit(1)
 
-    return OpenAI(api_key=OPENAI_API_KEY)
+    return OpenAIChatClient(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, default_model=LLM_MODEL)
 
 
 def _init_llm_client():
-    provider = (LLM_PROVIDER or "openai").lower()
+    provider = (LLM_PROVIDER or "").lower()
+    if provider not in {"openai", "ollama"}:
+        print(
+            f"Error: Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Allowed providers are 'openai' and 'ollama'."
+        )
+        sys.exit(1)
+
     if provider == "openai":
         return _init_openai_client()
-    if provider == "ollama":
-        return OllamaClient(api_base=LLM_API_BASE, default_model=LLM_MODEL)
 
-    print(
-        f"Error: Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Falling back to OpenAI configuration if available."
-    )
-    return _init_openai_client(allow_missing=True)
+    return OllamaClient(api_base=LLM_API_BASE, default_model=LLM_MODEL)
 
 
 client = _init_llm_client()
