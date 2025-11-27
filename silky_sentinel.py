@@ -33,6 +33,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 LLM_API_BASE = os.getenv("LLM_API_BASE", "https://ollama.silky.systems")
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
 
 
 # OpenAI/ChatGPT uses strict JSON parsing, but some Ollama/Qwen models add prose around
@@ -85,7 +86,9 @@ class OllamaResponses:
     def create(self, model: str, input: Any):
         prompt = self._messages_to_prompt(input)
         payload = {"model": model or self.default_model, "prompt": prompt, "stream": False}
-        response = requests.post(f"{self.api_base}/api/generate", json=payload, timeout=30)
+        response = requests.post(
+            f"{self.api_base}/api/generate", json=payload, timeout=LLM_TIMEOUT_SECONDS
+        )
         response.raise_for_status()
         data = response.json() if hasattr(response, "json") else {}
         output = data.get("response") or data.get("message") or ""
@@ -1660,27 +1663,30 @@ def night_analyze_with_llm(snapshot: dict) -> dict:
 
     user = json.dumps(snapshot)
 
-    resp = client.responses.create(
-        model=LLM_MODEL,
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
-
-    raw = resp.output_text.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
     try:
+        resp = client.responses.create(
+            model=LLM_MODEL,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        raw = resp.output_text.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
         json_payload = _prepare_json_for_loading(raw)
         return json.loads(json_payload)
-    except:
+    except Exception as e:
         return {
             "severity": "unknown",
-            "title": "Failed to parse LLM output",
-            "summary": raw[:500],
+            "title": "Night Mode LLM call failed",
+            "summary": (f"Error during LLM analysis: {e}"),
             "notable_pods": [],
-            "recommendations": [],
+            "recommendations": [
+                "Verify connectivity to the LLM endpoint.",
+                "Consider increasing LLM_TIMEOUT_SECONDS if timeouts persist.",
+            ],
         }
 
 
