@@ -34,6 +34,22 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
 LLM_API_BASE = os.getenv("LLM_API_BASE", "https://ollama.silky.systems")
 
+
+# OpenAI/ChatGPT uses strict JSON parsing, but some Ollama/Qwen models add prose around
+# JSON payloads. This helper identifies when the backend is Ollama so downstream logic can
+# relax parsing rules.
+def is_ollama_backend() -> bool:
+    base_url = os.getenv("OPENAI_BASE_URL", "")
+    if "ollama" in base_url.lower():
+        return True
+
+    if not base_url:
+        model_name = (LLM_MODEL or "").lower()
+        if model_name.startswith("qwen"):
+            return True
+
+    return False
+
 # Mode & night-mode config
 SILKY_MODE = os.getenv("SILKY_MODE", "chat")
 NIGHT_INTERVAL_SECONDS = int(os.getenv("NIGHT_INTERVAL_SECONDS", "300"))
@@ -685,6 +701,32 @@ def _sanitize_model_output(raw_text: str) -> str:
     return raw_text.replace("```json", "").replace("```", "").strip()
 
 
+# OpenAI/ChatGPT parsing remains strict, but Ollama/Qwen may wrap JSON with prose; this
+# helper extracts a JSON object string suitable for json.loads when Ollama is detected.
+def _prepare_json_for_loading(clean_text: str) -> str:
+    if not is_ollama_backend():
+        return clean_text
+
+    try:
+        json.loads(clean_text)
+        return clean_text
+    except json.JSONDecodeError:
+        pass
+
+    start = clean_text.find("{")
+    if start != -1:
+        for match in re.finditer(r"\}", clean_text[start:]):
+            end = start + match.end()
+            candidate = clean_text[start:end]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+    raise json.JSONDecodeError("Unable to decode JSON from model output", clean_text, 0)
+
+
 def agent_engine_step(
     state: AgentState, user_decision: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -796,7 +838,8 @@ def agent_engine_step(
     state["steps_done"] = state.get("steps_done", 0) + 1
 
     try:
-        data = json.loads(clean_text)
+        json_payload = _prepare_json_for_loading(clean_text)
+        data = json.loads(json_payload)
     except json.JSONDecodeError:
         raw_msg = f"RAW MODEL OUTPUT (non-JSON): {clean_text}"
         notify_admin(raw_msg, "ERROR")
@@ -1570,7 +1613,8 @@ def summarize_night_mode(events: list, latest_report: str | None) -> dict:
 
         raw = resp.output_text.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(raw)
+        json_payload = _prepare_json_for_loading(raw)
+        parsed = json.loads(json_payload)
 
         return {
             "summary_markdown": parsed.get("summary_markdown") or "(No summary returned)",
@@ -1628,7 +1672,8 @@ def night_analyze_with_llm(snapshot: dict) -> dict:
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
-        return json.loads(raw)
+        json_payload = _prepare_json_for_loading(raw)
+        return json.loads(json_payload)
     except:
         return {
             "severity": "unknown",
@@ -1833,7 +1878,8 @@ def generate_sre_suggestions(
 
         raw_text = response.output_text.strip()
         clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
+        json_payload = _prepare_json_for_loading(clean_text)
+        data = json.loads(json_payload)
         if not isinstance(data, dict):
             return {"suggestions": []}
         suggestions = data.get("suggestions")

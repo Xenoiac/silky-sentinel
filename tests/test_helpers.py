@@ -1,6 +1,5 @@
 import json
 import os
-from pathlib import Path
 
 import pytest
 
@@ -69,3 +68,65 @@ Exception another issue
     assert "ERROR something broke" in digest
     # only one snippet due to max_snippets
     assert digest.count("SNIPPET #") == 1
+
+
+def test_is_ollama_backend_detects_base_url(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ollama.example.com")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
+
+    assert silky_sentinel.is_ollama_backend() is True
+
+
+def test_is_ollama_backend_detects_qwen(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "qwen3:32b")
+
+    assert silky_sentinel.is_ollama_backend() is True
+
+
+def test_is_ollama_backend_openai(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
+
+    assert silky_sentinel.is_ollama_backend() is False
+
+
+def test_prepare_json_strict_passthrough(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "gpt-4")
+
+    clean_text = "not json"
+    prepared = silky_sentinel._prepare_json_for_loading(clean_text)
+
+    assert prepared == clean_text
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(prepared)
+
+
+def test_prepare_json_salvages_embedded_object(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ollama.local")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "qwen3:32b")
+
+    clean_text = "Here is the result: {\"foo\": \"bar\"} Thanks!"
+    prepared = silky_sentinel._prepare_json_for_loading(clean_text)
+
+    assert json.loads(prepared) == {"foo": "bar"}
+
+
+def test_prepare_json_returns_valid_when_clean(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ollama.local")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "qwen3:32b")
+
+    clean_text = '{"foo": 1}'
+    prepared = silky_sentinel._prepare_json_for_loading(clean_text)
+
+    assert prepared == clean_text
+    assert json.loads(prepared) == {"foo": 1}
+
+
+def test_prepare_json_raises_when_no_object(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ollama.local")
+    monkeypatch.setattr(silky_sentinel, "LLM_MODEL", "qwen3:32b")
+
+    with pytest.raises(json.JSONDecodeError):
+        silky_sentinel._prepare_json_for_loading("no json present")
