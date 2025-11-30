@@ -1696,36 +1696,48 @@ def night_analyze_with_llm(snapshot: dict) -> dict:
             "recommendations": [],
         }
 
+    chat_client = getattr(client, "client", None)
+    if chat_client is None:
+        return {
+            "severity": "info",
+            "title": "LLM client unavailable",
+            "summary": "OpenAI-compatible client missing.",
+            "notable_pods": [],
+            "recommendations": [],
+        }
+
     system = (
-        "You are Silky Sentinel Night Mode — an autonomous SRE guard.\n"
-        "You receive cluster snapshots and must classify anomalies.\n"
-        "Respond in STRICT JSON:\n"
-        "{\n"
+        "You are Silky Sentinel's Night Mode analyzer. You MUST respond with a single valid JSON object only. "
+        "Do not include explanations, Markdown, or code fences. No ```json fences, no extra text before or after the JSON. "
+        "Return exactly this JSON schema: {\n"
         '  "severity": "ok" | "low" | "medium" | "high" | "critical",\n'
-        '  "title": "<short title>",\n'
-        '  "summary": "<2-3 sentences>",\n'
-        '  "notable_pods": [ {"namespace": "...", "name": "...", "status": "...", "restarts": <int>} ],\n'
-        '  "recommendations": ["string", "string"]\n'
-        "}"
+        '  "title": "<short title summarizing the issue>",\n'
+        '  "summary": "<2-3 sentences describing current cluster health>",\n'
+        '  "notable_pods": [ {"namespace": "<ns>", "name": "<pod>", "status": "<status>", "restarts": <int>} ],\n'
+        '  "recommendations": ["<short imperative action>", "<another action>"]\n'
+        "}."
     )
 
-    user = json.dumps(snapshot)
+    user = json.dumps({"snapshot": snapshot})
+
+    raw_text = ""
 
     try:
-        resp = client.responses.create(
+        completion = chat_client.chat.completions.create(
             model=LLM_MODEL,
-            input=[
+            messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            response_format={"type": "json_object"},
+            timeout=LLM_TIMEOUT_SECONDS,
         )
 
-        raw = resp.output_text or ""
-        parsed = parse_llm_json(raw, LLM_PROVIDER, "night_mode")
+        raw_text = completion.choices[0].message.content or ""
+        parsed = parse_llm_json(raw_text, LLM_PROVIDER, "night_mode")
         return parsed
     except ValueError as e:
-        raw = resp.output_text or ""
-        snippet = (raw.strip() or "(empty output)")[:400]
+        snippet = (raw_text.strip() or "(empty output)")[:400]
         print(
             "Using Night Mode fallback due to parse error "
             f"(provider={LLM_PROVIDER}, feature=night_mode): {e}. Snippet: {snippet}"
@@ -1912,37 +1924,47 @@ def generate_sre_suggestions(
         "events": events,
         "latest_report": latest_report,
     }
+    chat_client = getattr(client, "client", None)
+    if chat_client is None:
+        return {"suggestions": []}
+
     system_prompt = (
         build_sre_system_prompt(context)
-        + "You receive Kubernetes metrics, recent Night Mode events, and a high level report. "
-        "You must respond ONLY with JSON under a 'suggestions' key. Each suggestion must have a "
-        "concrete kubectl or diagnostic command in 'command', and a short 'action' sentence describing "
-        "what will be done."
+        + "You are Silky Sentinel's SRE suggestion engine. You MUST respond with a single valid JSON object only. "
+        "Do not include explanations, Markdown, or code fences. No ```json fences, no extra text before or after the JSON. "
+        "Return exactly this JSON schema: {\n"
+        '  "suggestions": [\n'
+        '    {"id": "sug-0001", "title": "<short title>", "reason": "<why>", "action": "<short action sentence>", "command": "<kubectl or diagnostic command>", "risk": "low" | "medium" | "high" | "unknown", "category": "capacity" | "reliability" | "pods" | "nodes" | "queues" | "networking" | "general"}\n'
+        "  ]\n"
+        "}."
     )
 
     snapshot_block = truncate_for_model(json.dumps(snapshot or {}))
     events_block = truncate_for_model(json.dumps(events or []))
     latest_report_block = truncate_for_model(latest_report or "")
 
-    user_prompt = (
-        "Cluster snapshot:\n"
-        f"{snapshot_block}\n\n"
-        "Recent events:\n"
-        f"{events_block}\n\n"
-        "Latest Night Mode report (text):\n"
-        f"{latest_report_block}"
+    user_prompt = json.dumps(
+        {
+            "snapshot_json": snapshot_block,
+            "recent_events_json": events_block,
+            "latest_report_text": latest_report_block,
+        }
     )
 
+    raw_text = ""
+
     try:
-        response = client.responses.create(
+        completion = chat_client.chat.completions.create(
             model=LLM_MODEL,
-            input=[
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_format={"type": "json_object"},
+            timeout=LLM_TIMEOUT_SECONDS,
         )
 
-        raw_text = response.output_text or ""
+        raw_text = completion.choices[0].message.content or ""
         data = parse_llm_json(raw_text, LLM_PROVIDER, "sre_suggestions")
         if not isinstance(data, dict):
             return {"suggestions": []}
@@ -1951,9 +1973,9 @@ def generate_sre_suggestions(
             return {"suggestions": []}
         return {"suggestions": suggestions}
     except ValueError as exc:
-        snippet_lines = [line.strip() for line in (response.output_text or "").splitlines() if line.strip()]
+        snippet_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
         if not snippet_lines:
-            snippet_lines = [(response.output_text or "(empty output)").strip() or "(empty output)"]
+            snippet_lines = [(raw_text or "(empty output)").strip() or "(empty output)"]
 
         print(
             "Using SRE suggestions fallback due to parse error "
