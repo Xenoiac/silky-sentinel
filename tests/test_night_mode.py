@@ -63,18 +63,17 @@ def test_night_analyze_with_llm_parses(monkeypatch):
             self.output_text = text
 
     class FakeClient:
-        def responses_create(self, **kwargs):
-            raise NotImplementedError
-
         def __init__(self, outputs):
             self.outputs = outputs
 
         def _create(self, **kwargs):
-            return FakeResponse(self.outputs.pop(0))
+            message = SimpleNamespace(content=self.outputs.pop(0))
+            choices = [SimpleNamespace(message=message)]
+            return SimpleNamespace(choices=choices)
 
         @property
-        def responses(self):
-            return SimpleNamespace(create=self._create)
+        def client(self):
+            return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=self._create)))
 
     output = json.dumps(
         {
@@ -106,11 +105,13 @@ def test_night_analyze_with_llm_invalid_json(monkeypatch):
             self.outputs = outputs
 
         def _create(self, **kwargs):
-            return FakeResponse(self.outputs.pop(0))
+            message = SimpleNamespace(content=self.outputs.pop(0))
+            choices = [SimpleNamespace(message=message)]
+            return SimpleNamespace(choices=choices)
 
         @property
-        def responses(self):
-            return SimpleNamespace(create=self._create)
+        def client(self):
+            return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=self._create)))
 
     fake_client = FakeClient(["{not-json"])
     monkeypatch.setattr(silky_sentinel, "client", fake_client)

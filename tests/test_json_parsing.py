@@ -4,17 +4,18 @@ from types import SimpleNamespace
 import silky_sentinel
 
 
-class DummyResponses:
+class FakeChatCompletions:
     def __init__(self, text: str):
         self._text = text
 
     def create(self, *args, **kwargs):
-        return SimpleNamespace(output_text=self._text)
+        message = SimpleNamespace(content=self._text)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 class DummyClient:
     def __init__(self, text: str):
-        self.responses = DummyResponses(text)
+        self.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeChatCompletions(text)))
 
 
 def test_generate_sre_suggestions_salvages_ollama_json(monkeypatch):
@@ -38,13 +39,14 @@ def test_parse_llm_json_strips_code_fences():
 
 
 def test_generate_sre_suggestions_fallback_on_parse_error(monkeypatch):
-    class DummyResponses:
+    class DummyCompletions:
         def create(self, *args, **kwargs):
-            return SimpleNamespace(output_text="Command 1\nCommand 2")
+            message = SimpleNamespace(content="Command 1\nCommand 2")
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
     class DummyClient:
         def __init__(self):
-            self.responses = DummyResponses()
+            self.client = SimpleNamespace(chat=SimpleNamespace(completions=DummyCompletions()))
 
     monkeypatch.setattr(silky_sentinel, "client", DummyClient())
     monkeypatch.setattr(silky_sentinel, "LLM_PROVIDER", "ollama")
