@@ -2002,6 +2002,33 @@ def generate_sre_suggestions(
             f"(provider={LLM_PROVIDER}, feature=sre_suggestions): {exc}."
         )
 
+        provider = (LLM_PROVIDER or "").lower()
+        if provider == "ollama":
+            text = raw_text.strip() or "(empty output)"
+            blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()] or [text]
+            if len(blocks) == 1 and "\n" in text:
+                blocks = [line.strip() for line in text.splitlines() if line.strip()]
+
+            fallback_suggestions = []
+            for idx, block in enumerate(blocks, start=1):
+                first_line = block.splitlines()[0].strip() if block else ""
+                title = first_line[:80] or "LLM suggestion"
+                fallback_suggestions.append(
+                    {
+                        "id": f"sug-ollama-raw-{idx:04d}",
+                        "title": title,
+                        "reason": "LLM returned markdown suggestion.",
+                        "action": first_line,
+                        "command": "",
+                        "risk": "unknown",
+                        "category": "general",
+                        "raw_text": block,
+                        "markdown": block,
+                    }
+                )
+
+            return {"suggestions": fallback_suggestions}
+
         fallback_suggestions = []
         for idx, line in enumerate(snippet_lines, start=1):
             fallback_suggestions.append(

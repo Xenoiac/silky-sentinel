@@ -1288,6 +1288,14 @@ button.secondary:hover {
   overflow-x: auto;
 }
 
+.suggestion-markdown {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
 .suggestion-actions {
   display: flex;
   gap: 6px;

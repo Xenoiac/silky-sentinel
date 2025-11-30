@@ -1583,17 +1583,29 @@ async function loadSreSuggestions() {
       card.className = "suggestion-card";
       card.dataset.suggestionId = s.id;
 
+      const rawMarkdown = (s.markdown || s.raw_text || "").toString().trim();
+      const title = s.title || firstLine(rawMarkdown) || "LLM Suggestion";
+      const hasStructuredFields = Boolean(s.reason || s.action || s.command);
+
+      const content = hasStructuredFields
+        ? `
+            <p class="suggestion-reason">${s.reason || ""}</p>
+            <p class="suggestion-action"><strong>Action:</strong> ${s.action || ""}</p>
+            <pre class="suggestion-command">${s.command || ""}</pre>
+          `
+        : rawMarkdown
+          ? `<div class="suggestion-markdown">${renderMarkdown(rawMarkdown)}</div>`
+          : "<p class=\"suggestion-reason\">(No details provided.)</p>";
+
       card.innerHTML = `
-        <div class="suggestion-title">${s.title}</div>
+        <div class="suggestion-title">${title}</div>
         <div class="suggestion-meta">
           <span class="suggestion-risk suggestion-risk-${s.risk || "low"}">
             Risk: ${(s.risk || "low").toUpperCase()}
           </span>
           <span class="suggestion-category">${s.category || ""}</span>
         </div>
-        <p class="suggestion-reason">${s.reason}</p>
-        <p class="suggestion-action"><strong>Action:</strong> ${s.action}</p>
-        <pre class="suggestion-command">${s.command}</pre>
+        ${content}
         <div class="suggestion-result"></div>
         <div class="suggestion-actions">
           <button class="apply-btn">Apply</button>

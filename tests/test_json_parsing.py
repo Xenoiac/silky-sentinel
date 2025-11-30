@@ -54,4 +54,5 @@ def test_generate_sre_suggestions_fallback_on_parse_error(monkeypatch):
     result = silky_sentinel.generate_sre_suggestions({}, [], None)
 
     assert len(result["suggestions"]) == 2
-    assert result["suggestions"][0]["id"].startswith("sug-fallback-")
+    assert result["suggestions"][0]["id"].startswith("sug-ollama-raw-")
+    assert result["suggestions"][0]["raw_text"] == "Command 1"
