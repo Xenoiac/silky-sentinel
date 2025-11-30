@@ -93,6 +93,79 @@ function firstLine(text = "") {
   return line ? line.trim() : "";
 }
 
+function escapeHtml(text = "") {
+  return text
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderMarkdown(md = "") {
+  const safe = escapeHtml(md);
+  const lines = safe.split(/\r?\n/);
+  const html = [];
+  let inList = false;
+  let inCode = false;
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCode) {
+        html.push("</code></pre>");
+        inCode = false;
+      } else {
+        html.push("<pre><code>");
+        inCode = true;
+      }
+      return;
+    }
+
+    if (inCode) {
+      html.push(line || "");
+      return;
+    }
+
+    const listMatch = trimmed.match(/^[-*]\s+(.*)$/);
+    if (listMatch) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${listMatch[1]}</li>`);
+      return;
+    }
+
+    if (inList) {
+      html.push("</ul>");
+      inList = false;
+    }
+
+    const headingMatch = trimmed.match(/^#{1,3}\s+(.*)$/);
+    if (headingMatch) {
+      html.push(`<h4>${headingMatch[1]}</h4>`);
+      return;
+    }
+
+    if (trimmed.length) {
+      html.push(`<p>${trimmed}</p>`);
+    }
+  });
+
+  if (inList) {
+    html.push("</ul>");
+  }
+
+  if (inCode) {
+    html.push("</code></pre>");
+  }
+
+  return html.join("\n") || "<p>(No summary available)</p>";
+}
+
 function severityTone(level = "") {
   const normalized = level.toString().toLowerCase();
   if (normalized === "ok" || normalized === "low") return "ok";
@@ -1318,13 +1391,90 @@ async function loadNightEvents() {
   }
 }
 
+function renderNightSummaryContent(data) {
+  if (!els.nightSummaryBox) return;
+
+  const container = els.nightSummaryBox;
+  container.innerHTML = "";
+
+  const markdownFallback = (data?.analysis_markdown || data?.raw_summary_text || "").trim();
+  const summaryMarkdown = (data?.summary_markdown || "").trim();
+  const recommendations = Array.isArray(data?.recommendations)
+    ? data.recommendations.filter(Boolean)
+    : [];
+  const histogram = data?.severity_histogram || {};
+  const severity = data?.severity || data?.overall_severity || "";
+
+  if (markdownFallback) {
+    const label = document.createElement("div");
+    label.className = "summary-mode-label";
+    label.title =
+      "This summary was generated from markdown output because the model did not return structured JSON.";
+    label.innerHTML = '<span class="info-icon" aria-hidden="true">i</span><span>LLM markdown summary (Ollama)</span>';
+
+    const markdownBlock = document.createElement("div");
+    markdownBlock.className = "night-summary-markdown";
+    markdownBlock.innerHTML = renderMarkdown(markdownFallback);
+
+    container.appendChild(label);
+    container.appendChild(markdownBlock);
+    return;
+  }
+
+  const hasHistogram = histogram && Object.keys(histogram).length > 0;
+  const hasStructuredContent = Boolean(summaryMarkdown || recommendations.length || hasHistogram || severity);
+
+  if (hasStructuredContent) {
+    const sections = document.createElement("div");
+    sections.className = "night-summary-sections";
+
+    if (summaryMarkdown) {
+      const summarySection = document.createElement("div");
+      summarySection.className = "night-summary-section";
+      summarySection.innerHTML = `<h4>Summary</h4>${renderMarkdown(summaryMarkdown)}`;
+      sections.appendChild(summarySection);
+    }
+
+    if (severity) {
+      const severitySection = document.createElement("div");
+      severitySection.className = "night-summary-section";
+      severitySection.innerHTML = `<h4>Overall Severity</h4><p>${severity.toString().toUpperCase()}</p>`;
+      sections.appendChild(severitySection);
+    }
+
+    if (hasHistogram) {
+      const histogramSection = document.createElement("div");
+      histogramSection.className = "night-summary-section";
+      const entries = Object.entries(histogram)
+        .map(([level, count]) => `<li><strong>${level.toUpperCase()}:</strong> ${count}</li>`)
+        .join("");
+      histogramSection.innerHTML = `<h4>Severity Histogram</h4><ul>${entries}</ul>`;
+      sections.appendChild(histogramSection);
+    }
+
+    if (recommendations.length) {
+      const recSection = document.createElement("div");
+      recSection.className = "night-summary-section";
+      const items = recommendations.map((rec) => `<li>${escapeHtml(rec)}</li>`).join("");
+      recSection.innerHTML = `<h4>Recommendations</h4><ul>${items}</ul>`;
+      sections.appendChild(recSection);
+    }
+
+    container.appendChild(sections);
+    return;
+  }
+
+  container.textContent = "Unable to load Night Mode summary.";
+}
+
 async function loadNightSummary() {
   if (!els.nightSummaryBox) return;
+  els.nightSummaryBox.textContent = "Loading summary…";
   try {
     const resp = await fetch("/api/night/summary");
     if (!resp.ok) throw new Error(`Failed to load summary: ${resp.status}`);
     const data = await resp.json();
-    els.nightSummaryBox.textContent = data.summary_markdown || "(No summary available)";
+    renderNightSummaryContent(data || {});
   } catch (err) {
     console.error(err);
     els.nightSummaryBox.textContent = "Unable to load Night Mode summary.";
