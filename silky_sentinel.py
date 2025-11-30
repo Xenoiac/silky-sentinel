@@ -1665,6 +1665,26 @@ def summarize_night_mode(events: list, latest_report: str | None) -> dict:
         )
 
         raw = resp.output_text or ""
+        provider = (LLM_PROVIDER or "").lower()
+
+        if provider == "ollama":
+            summary_text = raw.strip() or "(No summary returned)"
+            note = (
+                "Night Mode summary generated using markdown output from Ollama "
+                "(no JSON parsing)."
+            )
+
+            return {
+                "summary_markdown": summary_text,
+                "analysis_markdown": summary_text,
+                "severity_histogram": histogram,
+                "recommendations": [],
+                "severity": "unknown",
+                "provider_mode": "ollama_markdown",
+                "llm_parse_error": False,
+                "notes": [note],
+            }
+
         parsed = parse_llm_json(raw, LLM_PROVIDER, "night_mode_summary")
 
         return {
