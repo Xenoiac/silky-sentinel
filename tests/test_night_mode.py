@@ -118,7 +118,7 @@ def test_night_analyze_with_llm_invalid_json(monkeypatch):
 
     result = silky_sentinel.night_analyze_with_llm({"pods": [], "summary": {}})
     assert result["severity"] == "unknown"
-    assert result["title"] == "Failed to parse LLM output"
+    assert result["title"] == "LLM returned unstructured output"
 
 
 def test_log_event_and_generate_report(tmp_path, monkeypatch):

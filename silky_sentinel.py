@@ -740,6 +740,46 @@ def _prepare_json_for_loading(clean_text: str) -> str:
     raise json.JSONDecodeError("Unable to decode JSON from model output", clean_text, 0)
 
 
+def parse_llm_json(raw_output: str, provider: str, feature: str) -> dict:
+    """Normalize and parse JSON returned by an LLM.
+
+    Args:
+        raw_output: Raw text returned by the model.
+        provider: Provider name (e.g., "openai", "ollama").
+        feature: Feature name for logging context (e.g., "night_mode", "sre_suggestions").
+
+    Raises:
+        ValueError: If the output is empty or cannot be parsed as JSON.
+    """
+
+    raw_output = raw_output or ""
+    cleaned = raw_output.strip()
+    if not cleaned:
+        raise ValueError("Empty LLM output (nothing to parse)")
+
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        elif "```" in cleaned:
+            cleaned = cleaned[: cleaned.rfind("```")]
+        cleaned = cleaned.strip()
+
+    try:
+        json_payload = _prepare_json_for_loading(cleaned)
+        return json.loads(json_payload)
+    except Exception as exc:
+        snippet = cleaned[:1000]
+        print(
+            "Failed to parse LLM output "
+            f"(provider={provider}, feature={feature}): {exc}. Snippet: {snippet}"
+        )
+        raise ValueError(f"Unable to parse LLM output for {feature}: {exc}") from exc
+
+
 def agent_engine_step(
     state: AgentState, user_decision: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -1624,10 +1664,8 @@ def summarize_night_mode(events: list, latest_report: str | None) -> dict:
             ],
         )
 
-        raw = resp.output_text.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        json_payload = _prepare_json_for_loading(raw)
-        parsed = json.loads(json_payload)
+        raw = resp.output_text or ""
+        parsed = parse_llm_json(raw, LLM_PROVIDER, "night_mode_summary")
 
         return {
             "summary_markdown": parsed.get("summary_markdown") or "(No summary returned)",
@@ -1682,21 +1720,22 @@ def night_analyze_with_llm(snapshot: dict) -> dict:
             ],
         )
 
-        raw = resp.output_text.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-
-        json_payload = _prepare_json_for_loading(raw)
-        return json.loads(json_payload)
-    except json.JSONDecodeError as e:
+        raw = resp.output_text or ""
+        parsed = parse_llm_json(raw, LLM_PROVIDER, "night_mode")
+        return parsed
+    except ValueError as e:
+        raw = resp.output_text or ""
+        snippet = (raw.strip() or "(empty output)")[:400]
+        print(
+            "Using Night Mode fallback due to parse error "
+            f"(provider={LLM_PROVIDER}, feature=night_mode): {e}. Snippet: {snippet}"
+        )
         return {
             "severity": "unknown",
-            "title": "Failed to parse LLM output",
-            "summary": (f"Error during LLM analysis: {e}"),
+            "title": "LLM returned unstructured output",
+            "summary": f"LLM returned unstructured output. Raw snippet: {snippet}",
             "notable_pods": [],
-            "recommendations": [
-                "Verify the model returned valid JSON without extra prose.",
-                "Consider increasing LLM_TIMEOUT_SECONDS if timeouts persist.",
-            ],
+            "recommendations": [],
         }
     except Exception as e:
         return {
@@ -1903,16 +1942,39 @@ def generate_sre_suggestions(
             ],
         )
 
-        raw_text = response.output_text.strip()
-        clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-        json_payload = _prepare_json_for_loading(clean_text)
-        data = json.loads(json_payload)
+        raw_text = response.output_text or ""
+        data = parse_llm_json(raw_text, LLM_PROVIDER, "sre_suggestions")
         if not isinstance(data, dict):
             return {"suggestions": []}
         suggestions = data.get("suggestions")
         if not isinstance(suggestions, list):
             return {"suggestions": []}
         return {"suggestions": suggestions}
+    except ValueError as exc:
+        snippet_lines = [line.strip() for line in (response.output_text or "").splitlines() if line.strip()]
+        if not snippet_lines:
+            snippet_lines = [(response.output_text or "(empty output)").strip() or "(empty output)"]
+
+        print(
+            "Using SRE suggestions fallback due to parse error "
+            f"(provider={LLM_PROVIDER}, feature=sre_suggestions): {exc}."
+        )
+
+        fallback_suggestions = []
+        for idx, line in enumerate(snippet_lines, start=1):
+            fallback_suggestions.append(
+                {
+                    "id": f"sug-fallback-{idx:04d}",
+                    "title": line[:80],
+                    "reason": "LLM returned unstructured output.",
+                    "action": line,
+                    "command": "",
+                    "risk": "unknown",
+                    "category": "general",
+                }
+            )
+
+        return {"suggestions": fallback_suggestions}
     except Exception:
         return {"suggestions": []}
 
