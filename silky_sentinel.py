@@ -5,7 +5,6 @@ import time
 import shutil
 import subprocess
 import requests
-from ollama import Client as OllamaAPIClient
 import re
 from pathlib import Path
 
@@ -33,8 +32,8 @@ KUBECONFIG = os.getenv("KUBECONFIG")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "mistral-small3.2:latest")  # default model
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
-LLM_API_BASE = (os.getenv("LLM_API_BASE") or "https://ollam.silky.systems").rstrip("/")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+LLM_API_BASE = os.getenv("LLM_API_BASE")
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
 
 
@@ -46,11 +45,11 @@ def is_ollama_backend() -> bool:
     if provider == "ollama":
         return True
 
-    base_url = os.getenv("OPENAI_BASE_URL", OPENAI_BASE_URL)
+    base_url = os.getenv("OPENAI_BASE_URL", OPENAI_BASE_URL) or ""
     if "ollama" in base_url.lower():
         return True
 
-    api_base = os.getenv("LLM_API_BASE", LLM_API_BASE)
+    api_base = os.getenv("LLM_API_BASE", LLM_API_BASE or "") or ""
     if "ollama" in api_base.lower():
         return True
 
@@ -72,39 +71,6 @@ AUDIT_LOG_PATH = Path(__file__).resolve().parent / "audit.log"
 # --------------------------------------------------------------------
 
 
-class OllamaResponses:
-    def __init__(self, client: OllamaAPIClient, default_model: str):
-        self.client = client
-        self.default_model = default_model
-
-    def _normalize_messages(self, input: Any) -> List[Dict[str, str]]:
-        if isinstance(input, list):
-            return input
-        if isinstance(input, dict):
-            return [input]  # type: ignore[list-item]
-        return [{"role": "user", "content": str(input)}]
-
-    def create(self, model: str, input: Any):
-        messages = self._normalize_messages(input)
-        response = self.client.chat(
-            model=model or self.default_model,
-            messages=messages,
-            stream=False,
-        )
-        content = ""
-        try:
-            content = response.get("message", {}).get("content") or ""
-        except Exception:
-            content = ""
-        return SimpleNamespace(output_text=str(content), raw=response)
-
-
-class OllamaClient:
-    def __init__(self, api_base: str, default_model: str):
-        self.client = OllamaAPIClient(host=api_base.rstrip("/"))
-        self.responses = OllamaResponses(self.client, default_model)
-
-
 class OpenAIChatResponses:
     def __init__(self, client: OpenAI, default_model: str):
         self.client = client
@@ -117,12 +83,13 @@ class OpenAIChatResponses:
             return [input]  # type: ignore[list-item]
         return [{"role": "user", "content": str(input)}]
 
-    def create(self, model: str, input: Any):
+    def create(self, model: str, input: Any, **kwargs: Any):
         messages = self._normalize_messages(input)
         completion = self.client.chat.completions.create(
             model=model or self.default_model,
             messages=messages,
             timeout=LLM_TIMEOUT_SECONDS,
+            **kwargs,
         )
         try:
             content = completion.choices[0].message.content or ""
@@ -137,11 +104,11 @@ class OpenAIChatClient:
         self.responses = OpenAIChatResponses(self.client, default_model)
 
 
-def _init_openai_client(allow_missing: bool = False):
-    if OPENAI_API_KEY == "DUMMY_KEY_FOR_MOCK_DEMO":
+def _init_openai_client(api_key: Optional[str], base_url: str, allow_missing: bool = False):
+    if api_key == "DUMMY_KEY_FOR_MOCK_DEMO":
         return None
 
-    if not OPENAI_API_KEY:
+    if not api_key:
         msg = "Error: OPENAI_API_KEY not found or invalid. Please update your .env file."
         if allow_missing:
             print(msg)
@@ -149,7 +116,7 @@ def _init_openai_client(allow_missing: bool = False):
         print(msg)
         sys.exit(1)
 
-    return OpenAIChatClient(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, default_model=LLM_MODEL)
+    return OpenAIChatClient(api_key=api_key, base_url=base_url, default_model=LLM_MODEL)
 
 
 def _init_llm_client():
@@ -161,9 +128,14 @@ def _init_llm_client():
         sys.exit(1)
 
     if provider == "openai":
-        return _init_openai_client()
+        base_url = (os.getenv("OPENAI_BASE_URL", OPENAI_BASE_URL) or "https://api.openai.com/v1").rstrip("/")
+        api_key = os.getenv("OPENAI_API_KEY", OPENAI_API_KEY)
+        return _init_openai_client(api_key=api_key, base_url=base_url)
 
-    return OllamaClient(api_base=LLM_API_BASE, default_model=LLM_MODEL)
+    api_base = (os.getenv("LLM_API_BASE") or LLM_API_BASE or "http://localhost:11434").rstrip("/")
+    base_url = f"{api_base}/v1"
+    api_key = os.getenv("OPENAI_API_KEY", "ollama") or "ollama"
+    return _init_openai_client(api_key=api_key, base_url=base_url, allow_missing=True)
 
 
 client = _init_llm_client()
