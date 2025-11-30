@@ -5,6 +5,7 @@ import time
 import shutil
 import subprocess
 import requests
+from ollama import Client as OllamaAPIClient
 import re
 from pathlib import Path
 
@@ -31,9 +32,9 @@ KUBECONFIG = os.getenv("KUBECONFIG")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5.1")  # default model
+LLM_MODEL = os.getenv("LLM_MODEL", "mistral-small3.2:latest")  # default model
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
-LLM_API_BASE = (os.getenv("LLM_API_BASE") or "http://localhost:11434").rstrip("/")
+LLM_API_BASE = (os.getenv("LLM_API_BASE") or "https://ollam.silky.systems").rstrip("/")
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
 
 
@@ -72,40 +73,36 @@ AUDIT_LOG_PATH = Path(__file__).resolve().parent / "audit.log"
 
 
 class OllamaResponses:
-    def __init__(self, api_base: str, default_model: str):
-        self.api_base = api_base.rstrip("/")
+    def __init__(self, client: OllamaAPIClient, default_model: str):
+        self.client = client
         self.default_model = default_model
 
-    def _messages_to_prompt(self, messages: Any) -> str:
-        if isinstance(messages, str):
-            return messages
-        if isinstance(messages, list):
-            parts = []
-            for msg in messages:
-                if isinstance(msg, dict):
-                    role = msg.get("role", "user")
-                    content = msg.get("content", "")
-                    parts.append(f"{role.upper()}: {content}")
-                else:
-                    parts.append(str(msg))
-            return "\n\n".join(parts)
-        return str(messages)
+    def _normalize_messages(self, input: Any) -> List[Dict[str, str]]:
+        if isinstance(input, list):
+            return input
+        if isinstance(input, dict):
+            return [input]  # type: ignore[list-item]
+        return [{"role": "user", "content": str(input)}]
 
     def create(self, model: str, input: Any):
-        prompt = self._messages_to_prompt(input)
-        payload = {"model": model or self.default_model, "prompt": prompt, "stream": False}
-        response = requests.post(
-            f"{self.api_base}/api/generate", json=payload, timeout=LLM_TIMEOUT_SECONDS
+        messages = self._normalize_messages(input)
+        response = self.client.chat(
+            model=model or self.default_model,
+            messages=messages,
+            stream=False,
         )
-        response.raise_for_status()
-        data = response.json() if hasattr(response, "json") else {}
-        output = data.get("response") or data.get("message") or ""
-        return SimpleNamespace(output_text=str(output), raw=data)
+        content = ""
+        try:
+            content = response.get("message", {}).get("content") or ""
+        except Exception:
+            content = ""
+        return SimpleNamespace(output_text=str(content), raw=response)
 
 
 class OllamaClient:
     def __init__(self, api_base: str, default_model: str):
-        self.responses = OllamaResponses(api_base, default_model)
+        self.client = OllamaAPIClient(host=api_base.rstrip("/"))
+        self.responses = OllamaResponses(self.client, default_model)
 
 
 class OpenAIChatResponses:
